@@ -9,6 +9,7 @@ import {
   SafeAreaView,
   Platform,
   ActivityIndicator,
+  FlatList,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome5';
 import { useNavigation } from '@react-navigation/native';
@@ -33,6 +34,13 @@ const SafetyDashboard = () => {
   const navigation = useNavigation();
   const [currentDate, setCurrentDate] = useState('');
   const [chartsReady, setChartsReady] = useState(false);
+  const [expandedSections, setExpandedSections] = useState({
+    ptw: true,
+    chemical: true,
+    training: true,
+    incident: true,
+  });
+  const [selectedLocation, setSelectedLocation] = useState('all');
 
   // Get current date on component mount
   useEffect(() => {
@@ -45,7 +53,7 @@ const SafetyDashboard = () => {
     setTimeout(() => setChartsReady(true), 100);
   }, []);
 
-  // ========== DATA STRUCTURES ==========
+  // ========== DATA STRUCTURES (Enhanced from web version) ==========
   const ptwData = {
     total: 24,
     active: 8,
@@ -61,11 +69,83 @@ const SafetyDashboard = () => {
       Others: 4,
     },
     departments: {
-      Maint: 8,
-      Elect: 6,
+      Maintenance: 8,
+      Electrical: 6,
       Civil: 4,
       Process: 3,
       Facilities: 3,
+    },
+    locations: {
+      "Main Plant - Building A": {
+        total: 8,
+        active: 3,
+        pending: 2,
+        completed: 2,
+        cancelled: 1,
+        peopleCount: 45,
+        supervisor: "John Smith",
+        workTypes: {
+          "Hot Work": 2,
+          "Electrical": 3,
+          "Height Work": 2,
+          "Others": 1
+        }
+      },
+      "Warehouse - Section B": {
+        total: 6,
+        active: 2,
+        pending: 1,
+        completed: 2,
+        cancelled: 1,
+        peopleCount: 28,
+        supervisor: "Sarah Johnson",
+        workTypes: {
+          "Height Work": 2,
+          "Confined Space": 1,
+          "Electrical": 2,
+          "Others": 1
+        }
+      },
+      "Administrative Block": {
+        total: 3,
+        active: 1,
+        pending: 1,
+        completed: 1,
+        cancelled: 0,
+        peopleCount: 15,
+        supervisor: "Mike Wilson",
+        workTypes: {
+          "Electrical": 1,
+          "Others": 2
+        }
+      },
+      "Production Line 2": {
+        total: 4,
+        active: 1,
+        pending: 1,
+        completed: 1,
+        cancelled: 1,
+        peopleCount: 32,
+        supervisor: "Emily Davis",
+        workTypes: {
+          "Hot Work": 2,
+          "Hazardous Material": 1,
+          "Others": 1
+        }
+      },
+      "Maintenance Workshop": {
+        total: 3,
+        active: 1,
+        pending: 1,
+        completed: 1,
+        cancelled: 0,
+        peopleCount: 18,
+        supervisor: "Robert Brown",
+        workTypes: {
+          "Confined Space": 2,
+          "Others": 1
+        }
+      }
     },
   };
 
@@ -96,6 +176,7 @@ const SafetyDashboard = () => {
     investigating: 3,
     closed: 8,
     scores: [92, 78, 85, 95, 88, 82, 90, 75, 88, 92, 85, 79, 91, 87, 83],
+    avgScore: 87,
   };
 
   const capaData = {
@@ -146,7 +227,7 @@ const SafetyDashboard = () => {
       id: 1, 
       route: "PermitToWork",
       title: 'Active PTW', 
-      value: '28', 
+      value: ptwData.active.toString(), 
       icon: 'file-signature', 
       color: '#11269C', 
       change: '+12%',
@@ -156,9 +237,9 @@ const SafetyDashboard = () => {
       id: 2, 
       route: "IncidentManagement",
       title: 'Open Incidents', 
-      value: '14', 
+      value: (incidentData.open + incidentData.investigating).toString(), 
       icon: 'exclamation-circle', 
-      color: '#bf0505', 
+      color: '#dc2626', 
       change: '-5%',
       bgColor: 'rgba(220, 38, 38, 0.1)',
     },
@@ -166,9 +247,9 @@ const SafetyDashboard = () => {
       id: 3, 
       route: "CapaScreen",
       title: 'CAPA in Progress', 
-      value: '9', 
+      value: (capaData.pending + capaData.verification).toString(), 
       icon: 'check-double', 
-      color: '#d18606', 
+      color: '#f59e0b', 
       change: '+3%',
       bgColor: 'rgba(245, 158, 11, 0.1)',
     },
@@ -176,13 +257,16 @@ const SafetyDashboard = () => {
       id: 4, 
       route: "ChemicalSafety",
       title: 'Chemicals', 
-      value: '47', 
+      value: chemicalData.active.toString(), 
       icon: 'flask', 
-      color: '#02aa12', 
+      color: '#10b981', 
       change: '+8%',
       bgColor: 'rgba(16, 185, 129, 0.1)',
     },
   ];
+
+  // Location data for dropdown
+  const locations = ['All Locations', ...Object.keys(ptwData.locations)];
 
   // Chart configuration
   const chartConfig = {
@@ -218,6 +302,14 @@ const SafetyDashboard = () => {
     name: key,
     population: ptwData.work_types[key],
     color: ['#ff6b35', '#dc2626', '#f59e0b', '#3b82f6', '#8b5cf6', '#6b7280'][index],
+    legendFontColor: '#374151',
+    legendFontSize: 12,
+  }));
+
+  const locationPieData = Object.keys(ptwData.locations).map((key, index) => ({
+    name: key.length > 15 ? key.substring(0, 12) + '...' : key,
+    population: ptwData.locations[key].total,
+    color: ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'][index],
     legendFontColor: '#374151',
     legendFontSize: 12,
   }));
@@ -274,6 +366,90 @@ const SafetyDashboard = () => {
     </View>
   );
 
+  // Section Header Component
+  const SectionHeader = ({ title, icon, badge, section, color = '#11269C' }) => (
+    <TouchableOpacity 
+      style={styles.sectionHeader}
+      onPress={() => setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }))}
+      activeOpacity={0.7}
+    >
+      <View style={styles.sectionHeaderLeft}>
+        <Icon name={icon} size={18} color={color} />
+        <Text style={styles.sectionTitle}>{title}</Text>
+      </View>
+      <View style={styles.sectionHeaderRight}>
+        {badge && (
+          <View style={[styles.sectionBadge, { backgroundColor: color + '20' }]}>
+            <Text style={[styles.sectionBadgeText, { color }]}>{badge}</Text>
+          </View>
+        )}
+        <Icon 
+          name={expandedSections[section] ? 'chevron-up' : 'chevron-down'} 
+          size={14} 
+          color="#6b7280" 
+        />
+      </View>
+    </TouchableOpacity>
+  );
+
+  // Location Filter Component
+  const LocationFilter = () => (
+    <ScrollView 
+      horizontal 
+      showsHorizontalScrollIndicator={false}
+      style={styles.filterScroll}
+      contentContainerStyle={styles.filterContainer}
+    >
+      {locations.map((location, index) => (
+        <TouchableOpacity
+          key={index}
+          style={[
+            styles.filterChip,
+            selectedLocation === location && styles.filterChipActive
+          ]}
+          onPress={() => setSelectedLocation(location)}
+        >
+          <Text style={[
+            styles.filterChipText,
+            selectedLocation === location && styles.filterChipTextActive
+          ]}>
+            {location}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </ScrollView>
+  );
+
+  // People Count Card Component
+  const PeopleCountCard = ({ location, data }) => (
+    <View style={styles.peopleCard}>
+      <View style={styles.peopleCardHeader}>
+        <Text style={styles.peopleCardTitle}>{location}</Text>
+        <View style={[styles.peopleBadge, { backgroundColor: '#11269C20' }]}>
+          <Icon name="users" size={10} color="#11269C" />
+          <Text style={styles.peopleBadgeText}>{data.peopleCount}</Text>
+        </View>
+      </View>
+      <Text style={styles.peopleSupervisor}>
+        <Icon name="user-tie" size={10} color="#6b7280" /> {data.supervisor}
+      </Text>
+      <View style={styles.peopleStats}>
+        <View style={styles.peopleStat}>
+          <Text style={styles.peopleStatValue}>{data.active}</Text>
+          <Text style={styles.peopleStatLabel}>Active</Text>
+        </View>
+        <View style={styles.peopleStat}>
+          <Text style={styles.peopleStatValue}>{data.pending}</Text>
+          <Text style={styles.peopleStatLabel}>Pending</Text>
+        </View>
+        <View style={styles.peopleStat}>
+          <Text style={styles.peopleStatValue}>{data.completed}</Text>
+          <Text style={styles.peopleStatLabel}>Completed</Text>
+        </View>
+      </View>
+    </View>
+  );
+
   // Handle stat card press with navigation
   const handleStatPress = useCallback((route) => {
     if (route) {
@@ -300,7 +476,7 @@ const SafetyDashboard = () => {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Safety Dashboard</Text>
           <View style={styles.dateTag}>
-            <Icon name="calendar-check" size={12} color="#0410b5" />
+            <Icon name="calendar-check" size={12} color="#11269C" />
             <Text style={styles.dateText}>{currentDate}</Text>
           </View>
         </View>
@@ -342,342 +518,434 @@ const SafetyDashboard = () => {
           ))}
         </View>
 
+        {/* Location Filter */}
+        <LocationFilter />
+
         {/* Charts - Only render when ready */}
         {chartsReady && (
           <Suspense fallback={<ChartLoader />}>
             {/* PTW ANALYTICS SECTION */}
             <View style={styles.sectionContainer}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>
-                  <Icon name="file-signature" size={18} color="#11269C" /> PTW Analytics
-                </Text>
-                <View style={styles.sectionBadge}>
-                  <Text style={styles.sectionBadgeText}>24 Total</Text>
-                </View>
-              </View>
+              <SectionHeader 
+                title="PTW Analytics" 
+                icon="file-signature" 
+                badge={`${ptwData.total} Total`}
+                section="ptw"
+              />
 
-              <View style={styles.fourChartGrid}>
-                {/* PTW Status Distribution */}
-                <View style={styles.chartCard}>
-                  <View style={styles.chartHeader}>
-                    <Text style={styles.chartTitle}>Status Distribution</Text>
-                    <View style={styles.chartDot} />
-                  </View>
-                  <View style={styles.canvasContainer}>
-                    <PieChart
-                      data={ptwStatusPieData}
-                      width={isSmallScreen ? width - 64 : (isMediumScreen ? width / 2 - 40 : width / 4 - 32)}
-                      height={180}
-                      chartConfig={chartConfig}
-                      accessor="population"
-                      paddingLeft="0"
-                      absolute
-                      hasLegend={false}
-                      backgroundColor="transparent"
-                    />
-                  </View>
-                  <View style={styles.chartFooter}>
-                    <Text style={styles.chartTotal}>Total: {ptwData.total}</Text>
-                    <View style={styles.legendContainer}>
-                      {ptwStatusPieData.map((item, index) => (
-                        <View key={index} style={styles.legendItem}>
-                          <View style={[styles.legendColor, { backgroundColor: item.color }]} />
-                          <Text style={styles.legendText}>{item.name}</Text>
-                        </View>
-                      ))}
+              {expandedSections.ptw && (
+                <>
+                  {/* Location Distribution Cards */}
+                  <Text style={styles.subSectionTitle}>Location Overview</Text>
+                  <ScrollView 
+                    horizontal 
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.peopleScroll}
+                  >
+                    {Object.keys(ptwData.locations).map((loc, index) => (
+                      <PeopleCountCard key={index} location={loc} data={ptwData.locations[loc]} />
+                    ))}
+                  </ScrollView>
+
+                  {/* PTW Status Distribution */}
+                  <View style={styles.chartCard}>
+                    <View style={styles.chartHeader}>
+                      <Text style={styles.chartTitle}>Status Distribution</Text>
+                      <View style={styles.chartDot} />
+                    </View>
+                    <View style={styles.canvasContainer}>
+                      <PieChart
+                        data={ptwStatusPieData}
+                        width={width - 64}
+                        height={180}
+                        chartConfig={chartConfig}
+                        accessor="population"
+                        paddingLeft="15"
+                        absolute
+                        hasLegend={false}
+                        backgroundColor="transparent"
+                      />
+                    </View>
+                    <View style={styles.chartFooter}>
+                      <Text style={styles.chartTotal}>Total: {ptwData.total}</Text>
+                      <View style={styles.legendContainer}>
+                        {ptwStatusPieData.map((item, index) => (
+                          <View key={index} style={styles.legendItem}>
+                            <View style={[styles.legendColor, { backgroundColor: item.color }]} />
+                            <Text style={styles.legendText}>{item.name}</Text>
+                          </View>
+                        ))}
+                      </View>
                     </View>
                   </View>
-                </View>
 
-                {/* Work Type Distribution */}
-                <View style={styles.chartCard}>
-                  <View style={styles.chartHeader}>
-                    <Text style={styles.chartTitle}>Work Type</Text>
-                    <View style={styles.chartDot} />
-                  </View>
-                  <View style={styles.canvasContainer}>
-                    <PieChart
-                      data={workTypeData}
-                      width={isSmallScreen ? width - 64 : (isMediumScreen ? width / 2 - 40 : width / 4 - 32)}
-                      height={180}
-                      chartConfig={chartConfig}
-                      accessor="population"
-                      paddingLeft="0"
-                      absolute
-                      hasLegend={false}
-                      backgroundColor="transparent"
-                    />
-                  </View>
-                  <View style={styles.chartFooter}>
-                    <View style={styles.legendContainer}>
-                      {workTypeData.slice(0, 3).map((item, index) => (
-                        <View key={index} style={styles.legendItem}>
-                          <View style={[styles.legendColor, { backgroundColor: item.color }]} />
-                          <Text style={styles.legendText}>{item.name}</Text>
-                        </View>
-                      ))}
+                  {/* Work Type Distribution */}
+                  <View style={styles.chartCard}>
+                    <View style={styles.chartHeader}>
+                      <Text style={styles.chartTitle}>Work Type Distribution</Text>
+                      <View style={[styles.chartDot, { backgroundColor: '#ff6b35' }]} />
+                    </View>
+                    <View style={styles.canvasContainer}>
+                      <PieChart
+                        data={workTypeData}
+                        width={width - 64}
+                        height={180}
+                        chartConfig={chartConfig}
+                        accessor="population"
+                        paddingLeft="15"
+                        absolute
+                        hasLegend={false}
+                        backgroundColor="transparent"
+                      />
+                    </View>
+                    <View style={styles.chartFooter}>
+                      <View style={styles.legendContainer}>
+                        {workTypeData.map((item, index) => (
+                          <View key={index} style={styles.legendItem}>
+                            <View style={[styles.legendColor, { backgroundColor: item.color }]} />
+                            <Text style={styles.legendText}>{item.name}</Text>
+                          </View>
+                        ))}
+                      </View>
                     </View>
                   </View>
-                </View>
 
-                {/* Monthly Incident Trend */}
-                <View style={styles.chartCard}>
-                  <View style={styles.chartHeader}>
-                    <Text style={styles.chartTitle}>Incident Trend</Text>
-                    <View style={[styles.chartDot, { backgroundColor: '#dc2626' }]} />
-                  </View>
-                  <View style={styles.canvasContainer}>
-                    <LineChart
-                      data={{
-                        labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-                        datasets: [{
-                          data: incidentData.monthly_trend,
+                  {/* Monthly Incident Trend */}
+                  <View style={styles.chartCard}>
+                    <View style={styles.chartHeader}>
+                      <Text style={styles.chartTitle}>Incident Trend</Text>
+                      <View style={[styles.chartDot, { backgroundColor: '#dc2626' }]} />
+                    </View>
+                    <View style={styles.canvasContainer}>
+                      <LineChart
+                        data={{
+                          labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+                          datasets: [{
+                            data: incidentData.monthly_trend,
+                            color: (opacity = 1) => `rgba(220, 38, 38, ${opacity})`,
+                            strokeWidth: 3,
+                          }],
+                        }}
+                        width={width - 64}
+                        height={180}
+                        chartConfig={{
+                          ...chartConfig,
                           color: (opacity = 1) => `rgba(220, 38, 38, ${opacity})`,
-                          strokeWidth: 3,
-                        }],
-                      }}
-                      width={isSmallScreen ? width - 64 : (isMediumScreen ? width / 2 - 40 : width / 4 - 32)}
-                      height={180}
-                      chartConfig={{
-                        ...chartConfig,
-                        color: (opacity = 1) => `rgba(220, 38, 38, ${opacity})`,
-                        fillShadowGradient: 'rgba(220, 38, 38, 0.1)',
-                        fillShadowGradientOpacity: 1,
-                      }}
-                      bezier
-                    />
+                          fillShadowGradient: 'rgba(220, 38, 38, 0.1)',
+                          fillShadowGradientOpacity: 1,
+                        }}
+                        bezier
+                      />
+                    </View>
                   </View>
-                </View>
 
-                {/* Audit Score Distribution */}
-                <View style={styles.chartCard}>
-                  <View style={styles.chartHeader}>
-                    <Text style={styles.chartTitle}>Audit Scores</Text>
-                    <View style={[styles.chartDot, { backgroundColor: '#3b82f6' }]} />
+                  {/* PTW by Department */}
+                  <View style={styles.chartCard}>
+                    <View style={styles.chartHeader}>
+                      <Text style={styles.chartTitle}>PTW by Department</Text>
+                      <View style={styles.chartDot} />
+                    </View>
+                    <View style={styles.canvasContainer}>
+                      <BarChart
+                        data={deptData}
+                        width={width - 64}
+                        height={180}
+                        chartConfig={{
+                          ...chartConfig,
+                          color: (opacity = 1) => `rgba(17, 38, 156, ${opacity})`,
+                        }}
+                        fromZero
+                      />
+                    </View>
                   </View>
-                  <View style={styles.canvasContainer}>
-                    <BarChart
-                      data={{
-                        labels: ['75-79', '80-84', '85-89', '90-94', '95+'],
-                        datasets: [{
-                          data: [
-                            auditData.scores.filter(s => s >= 75 && s < 80).length,
-                            auditData.scores.filter(s => s >= 80 && s < 85).length,
-                            auditData.scores.filter(s => s >= 85 && s < 90).length,
-                            auditData.scores.filter(s => s >= 90 && s < 95).length,
-                            auditData.scores.filter(s => s >= 95).length,
-                          ],
-                        }],
-                      }}
-                      width={isSmallScreen ? width - 64 : (isMediumScreen ? width / 2 - 40 : width / 4 - 32)}
-                      height={180}
-                      chartConfig={{
-                        ...chartConfig,
-                        color: (opacity = 1) => `rgba(59, 130, 246, ${opacity})`,
-                      }}
-                      fromZero
-                    />
-                  </View>
-                </View>
-              </View>
+                </>
+              )}
             </View>
 
             {/* CHEMICAL SAFETY SECTION */}
             <View style={styles.sectionContainer}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>
-                  <Icon name="flask" size={18} color="#11269C" /> Chemical Safety
-                </Text>
-                <View style={styles.sectionBadge}>
-                  <Text style={styles.sectionBadgeText}>{chemicalData.total} Chemicals</Text>
-                </View>
-              </View>
+              <SectionHeader 
+                title="Chemical Safety" 
+                icon="flask" 
+                badge={`${chemicalData.active} Active`}
+                section="chemical"
+                color="#10b981"
+              />
 
-              <View style={styles.twoChartGrid}>
-                {/* Chemical Hazard Classification */}
-                <View style={styles.chartCard}>
-                  <View style={styles.chartHeader}>
-                    <Text style={styles.chartTitle}>By Hazard Class</Text>
-                    <View style={[styles.chartDot, { backgroundColor: '#ff6b35' }]} />
+              {expandedSections.chemical && (
+                <>
+                  {/* Chemical Hazard Classification */}
+                  <View style={styles.chartCard}>
+                    <View style={styles.chartHeader}>
+                      <Text style={styles.chartTitle}>By Hazard Class</Text>
+                      <View style={[styles.chartDot, { backgroundColor: '#ff6b35' }]} />
+                    </View>
+                    <View style={styles.canvasContainer}>
+                      <BarChart
+                        data={{
+                          labels: hazardData.map(d => d.name.substring(0, 4)),
+                          datasets: [{
+                            data: hazardData.map(d => d.population),
+                          }],
+                        }}
+                        width={width - 64}
+                        height={200}
+                        chartConfig={{
+                          ...chartConfig,
+                          color: (opacity = 1) => `rgba(255, 107, 53, ${opacity})`,
+                        }}
+                        fromZero
+                      />
+                    </View>
+                    <View style={styles.chartFooter}>
+                      <View style={styles.legendContainer}>
+                        {hazardData.slice(0, 3).map((item, index) => (
+                          <View key={index} style={styles.legendItem}>
+                            <View style={[styles.legendColor, { backgroundColor: item.color }]} />
+                            <Text style={styles.legendText}>{item.name}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
                   </View>
-                  <View style={styles.canvasContainer}>
-                    <BarChart
-                      data={{
-                        labels: hazardData.map(d => d.name.substring(0, 4)),
-                        datasets: [{
-                          data: hazardData.map(d => d.population),
-                        }],
-                      }}
-                      width={isSmallScreen ? width - 64 : width - 64}
-                      height={200}
-                      chartConfig={{
-                        ...chartConfig,
-                        color: (opacity = 1) => `rgba(255, 107, 53, ${opacity})`,
-                      }}
-                      fromZero
-                    />
-                  </View>
-                </View>
 
-                {/* Chemical Location Distribution */}
-                <View style={styles.chartCard}>
-                  <View style={styles.chartHeader}>
-                    <Text style={styles.chartTitle}>By Location</Text>
-                    <View style={[styles.chartDot, { backgroundColor: '#10b981' }]} />
+                  {/* Chemical Location Distribution */}
+                  <View style={styles.chartCard}>
+                    <View style={styles.chartHeader}>
+                      <Text style={styles.chartTitle}>By Location</Text>
+                      <View style={[styles.chartDot, { backgroundColor: '#10b981' }]} />
+                    </View>
+                    <View style={styles.canvasContainer}>
+                      <BarChart
+                        data={locationData}
+                        width={width - 64}
+                        height={200}
+                        chartConfig={{
+                          ...chartConfig,
+                          color: (opacity = 1) => `rgba(16, 185, 129, ${opacity})`,
+                        }}
+                        fromZero
+                      />
+                    </View>
                   </View>
-                  <View style={styles.canvasContainer}>
-                    <BarChart
-                      data={locationData}
-                      width={isSmallScreen ? width - 64 : width - 64}
-                      height={200}
-                      chartConfig={{
-                        ...chartConfig,
-                        color: (opacity = 1) => `rgba(16, 185, 129, ${opacity})`,
-                      }}
-                      fromZero
-                    />
+
+                  {/* Chemical Status Summary */}
+                  <View style={styles.summaryCard}>
+                    <View style={styles.summaryItem}>
+                      <Text style={styles.summaryValue}>{chemicalData.active}</Text>
+                      <Text style={styles.summaryLabel}>Active</Text>
+                    </View>
+                    <View style={styles.summaryDivider} />
+                    <View style={styles.summaryItem}>
+                      <Text style={styles.summaryValue}>{chemicalData.expired}</Text>
+                      <Text style={styles.summaryLabel}>Expired</Text>
+                    </View>
+                    <View style={styles.summaryDivider} />
+                    <View style={styles.summaryItem}>
+                      <Text style={styles.summaryValue}>{chemicalData.disposed}</Text>
+                      <Text style={styles.summaryLabel}>Disposed</Text>
+                    </View>
                   </View>
-                </View>
-              </View>
+                </>
+              )}
             </View>
 
             {/* TRAINING SECTION */}
             <View style={styles.sectionContainer}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>
-                  <Icon name="graduation-cap" size={18} color="#11269C" /> Training
-                </Text>
-                <View style={styles.sectionBadge}>
-                  <Text style={styles.sectionBadgeText}>{trainingData.completion_rate}% Complete</Text>
-                </View>
-              </View>
+              <SectionHeader 
+                title="Training" 
+                icon="graduation-cap" 
+                badge={`${trainingData.completion_rate}% Complete`}
+                section="training"
+                color="#3b82f6"
+              />
 
-              <View style={styles.threeChartGrid}>
-                {/* Training Completion Progress Bar */}
-                <View style={[styles.chartCard, styles.progressCard]}>
-                  <View style={styles.chartHeader}>
-                    <Text style={styles.chartTitle}>Completion Progress</Text>
-                  </View>
-                  <View style={styles.progressContainer}>
-                    <View style={styles.progressStats}>
-                      <Text style={styles.progressStatValue}>{trainingData.completion_rate}%</Text>
-                      <Text style={styles.progressStatLabel}>Overall Completion</Text>
+              {expandedSections.training && (
+                <>
+                  {/* Training Completion Progress */}
+                  <View style={[styles.chartCard, styles.progressCard]}>
+                    <View style={styles.chartHeader}>
+                      <Text style={styles.chartTitle}>Completion Progress</Text>
                     </View>
-                    <ProgressBar progress={trainingData.completion_rate} color="#10b981" height={12} />
+                    <View style={styles.progressContainer}>
+                      <View style={styles.progressStats}>
+                        <Text style={styles.progressStatValue}>{trainingData.completion_rate}%</Text>
+                        <Text style={styles.progressStatLabel}>Overall Completion</Text>
+                      </View>
+                      <ProgressBar progress={trainingData.completion_rate} color="#10b981" height={12} />
+                      <View style={styles.scoreContainer}>
+                        <Icon name="star" size={12} color="#f59e0b" />
+                        <Text style={styles.scoreText}>Avg Score: {trainingData.avg_score}%</Text>
+                      </View>
+                    </View>
                   </View>
-                </View>
 
-                {/* Course Status */}
-                <View style={styles.chartCard}>
-                  <View style={styles.chartHeader}>
-                    <Text style={styles.chartTitle}>Course Status</Text>
+                  {/* Course Status */}
+                  <View style={styles.chartCard}>
+                    <View style={styles.chartHeader}>
+                      <Text style={styles.chartTitle}>Course Status</Text>
+                    </View>
+                    <View style={styles.canvasContainer}>
+                      <PieChart
+                        data={trainingCourseData}
+                        width={width - 64}
+                        height={180}
+                        chartConfig={chartConfig}
+                        accessor="population"
+                        paddingLeft="15"
+                        absolute
+                        backgroundColor="transparent"
+                      />
+                    </View>
+                    <View style={styles.courseStats}>
+                      {trainingCourseData.map((item, index) => (
+                        <View key={index} style={styles.courseStatItem}>
+                          <View style={[styles.courseDot, { backgroundColor: item.color }]} />
+                          <Text style={styles.courseStatText}>{item.name}: {item.population}</Text>
+                        </View>
+                      ))}
+                    </View>
                   </View>
-                  <View style={styles.canvasContainer}>
-                    <PieChart
-                      data={trainingCourseData}
-                      width={isSmallScreen ? width - 64 : (isMediumScreen ? width / 2 - 40 : width / 3 - 32)}
-                      height={180}
-                      chartConfig={chartConfig}
-                      accessor="population"
-                      paddingLeft="15"
-                      absolute
-                      backgroundColor="transparent"
-                    />
-                  </View>
-                </View>
 
-                {/* Monthly Completions */}
-                <View style={styles.chartCard}>
-                  <View style={styles.chartHeader}>
-                    <Text style={styles.chartTitle}>Monthly</Text>
+                  {/* Monthly Completions */}
+                  <View style={styles.chartCard}>
+                    <View style={styles.chartHeader}>
+                      <Text style={styles.chartTitle}>Monthly Completions</Text>
+                    </View>
+                    <View style={styles.canvasContainer}>
+                      <BarChart
+                        data={{
+                          labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+                          datasets: [{
+                            data: trainingData.monthly_completions,
+                          }],
+                        }}
+                        width={width - 64}
+                        height={180}
+                        chartConfig={{
+                          ...chartConfig,
+                          color: (opacity = 1) => `rgba(59, 130, 246, ${opacity})`,
+                        }}
+                        fromZero
+                      />
+                    </View>
                   </View>
-                  <View style={styles.canvasContainer}>
-                    <BarChart
-                      data={{
-                        labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-                        datasets: [{
-                          data: trainingData.monthly_completions,
-                        }],
-                      }}
-                      width={isSmallScreen ? width - 64 : (isMediumScreen ? width / 2 - 40 : width / 3 - 32)}
-                      height={180}
-                      chartConfig={{
-                        ...chartConfig,
-                        color: (opacity = 1) => `rgba(59, 130, 246, ${opacity})`,
-                      }}
-                      fromZero
-                    />
-                  </View>
-                </View>
-              </View>
+                </>
+              )}
             </View>
 
-            {/* DEPARTMENT & INCIDENT ANALYSIS */}
+            {/* INCIDENT & CAPA SECTION */}
             <View style={styles.sectionContainer}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>
-                  <Icon name="hard-hat" size={18} color="#11269C" /> Dept & Incident
-                </Text>
-              </View>
+              <SectionHeader 
+                title="Incident & CAPA" 
+                icon="exclamation-triangle" 
+                badge={`${incidentData.open} Open`}
+                section="incident"
+                color="#dc2626"
+              />
 
-              <View style={styles.threeChartGrid}>
-                {/* PTW by Department */}
-                <View style={styles.chartCard}>
-                  <View style={styles.chartHeader}>
-                    <Text style={styles.chartTitle}>PTW by Dept</Text>
+              {expandedSections.incident && (
+                <>
+                  {/* Incident Types */}
+                  <View style={styles.chartCard}>
+                    <View style={styles.chartHeader}>
+                      <Text style={styles.chartTitle}>Incident Types</Text>
+                    </View>
+                    <View style={styles.canvasContainer}>
+                      <PieChart
+                        data={incidentTypeData}
+                        width={width - 64}
+                        height={180}
+                        chartConfig={chartConfig}
+                        accessor="population"
+                        paddingLeft="15"
+                        absolute
+                        backgroundColor="transparent"
+                      />
+                    </View>
+                    <View style={styles.chartFooter}>
+                      <View style={styles.legendContainer}>
+                        {incidentTypeData.map((item, index) => (
+                          <View key={index} style={styles.legendItem}>
+                            <View style={[styles.legendColor, { backgroundColor: item.color }]} />
+                            <Text style={styles.legendText}>{item.name}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
                   </View>
-                  <View style={styles.canvasContainer}>
-                    <BarChart
-                      data={deptData}
-                      width={isSmallScreen ? width - 64 : (isMediumScreen ? width / 2 - 40 : width / 3 - 32)}
-                      height={180}
-                      chartConfig={{
-                        ...chartConfig,
-                        color: (opacity = 1) => `rgba(17, 38, 156, ${opacity})`,
-                      }}
-                      fromZero
-                    />
-                  </View>
-                </View>
 
-                {/* Incident Types */}
-                <View style={styles.chartCard}>
-                  <View style={styles.chartHeader}>
-                    <Text style={styles.chartTitle}>Incident Types</Text>
+                  {/* Incident Severity */}
+                  <View style={styles.chartCard}>
+                    <View style={styles.chartHeader}>
+                      <Text style={styles.chartTitle}>Severity Distribution</Text>
+                    </View>
+                    <View style={styles.severityContainer}>
+                      {Object.keys(incidentData.severity).map((key, index) => (
+                        <View key={key} style={styles.severityItem}>
+                          <View style={styles.severityHeader}>
+                            <Text style={styles.severityLabel}>{key}</Text>
+                            <Text style={[
+                              styles.severityValue,
+                              key === 'Critical' && styles.criticalText,
+                              key === 'Major' && styles.majorText,
+                            ]}>
+                              {incidentData.severity[key]}
+                            </Text>
+                          </View>
+                          <ProgressBar 
+                            progress={(incidentData.severity[key] / incidentData.total) * 100} 
+                            color={
+                              key === 'Critical' ? '#dc2626' :
+                              key === 'Major' ? '#f59e0b' :
+                              key === 'Minor' ? '#3b82f6' : '#10b981'
+                            }
+                            height={6}
+                            showPercentage={false}
+                          />
+                        </View>
+                      ))}
+                    </View>
                   </View>
-                  <View style={styles.canvasContainer}>
-                    <PieChart
-                      data={incidentTypeData}
-                      width={isSmallScreen ? width - 64 : (isMediumScreen ? width / 2 - 40 : width / 3 - 32)}
-                      height={180}
-                      chartConfig={chartConfig}
-                      accessor="population"
-                      paddingLeft="15"
-                      absolute
-                      backgroundColor="transparent"
-                    />
-                  </View>
-                </View>
 
-                {/* CAPA by Priority */}
-                <View style={styles.chartCard}>
-                  <View style={styles.chartHeader}>
-                    <Text style={styles.chartTitle}>CAPA Priority</Text>
+                  {/* CAPA Priority */}
+                  <View style={styles.chartCard}>
+                    <View style={styles.chartHeader}>
+                      <Text style={styles.chartTitle}>CAPA by Priority</Text>
+                    </View>
+                    <View style={styles.canvasContainer}>
+                      <BarChart
+                        data={capaPriorityData}
+                        width={width - 64}
+                        height={180}
+                        chartConfig={{
+                          ...chartConfig,
+                          color: (opacity = 1) => `rgba(245, 158, 11, ${opacity})`,
+                        }}
+                        fromZero
+                      />
+                    </View>
                   </View>
-                  <View style={styles.canvasContainer}>
-                    <BarChart
-                      data={capaPriorityData}
-                      width={isSmallScreen ? width - 64 : (isMediumScreen ? width / 2 - 40 : width / 3 - 32)}
-                      height={180}
-                      chartConfig={{
-                        ...chartConfig,
-                        color: (opacity = 1) => `rgba(245, 158, 11, ${opacity})`,
-                      }}
-                      fromZero
-                    />
+
+                  {/* CAPA Status Summary */}
+                  <View style={styles.summaryCard}>
+                    <View style={styles.summaryItem}>
+                      <Text style={styles.summaryValue}>{capaData.pending}</Text>
+                      <Text style={styles.summaryLabel}>Pending</Text>
+                    </View>
+                    <View style={styles.summaryDivider} />
+                    <View style={styles.summaryItem}>
+                      <Text style={styles.summaryValue}>{capaData.verification}</Text>
+                      <Text style={styles.summaryLabel}>Verification</Text>
+                    </View>
+                    <View style={styles.summaryDivider} />
+                    <View style={styles.summaryItem}>
+                      <Text style={styles.summaryValue}>{capaData.closed}</Text>
+                      <Text style={styles.summaryLabel}>Closed</Text>
+                    </View>
                   </View>
-                </View>
-              </View>
+                </>
+              )}
             </View>
           </Suspense>
         )}
@@ -791,33 +1059,39 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
   },
-  filterToggle: {
+  filterScroll: {
+    marginTop: 16,
+    marginBottom: 8,
+    paddingHorizontal: 16,
+  },
+  filterContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
     gap: 8,
-    padding: 12,
+    paddingRight: 16,
+  },
+  filterChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     backgroundColor: '#fff',
+    borderRadius: 30,
     borderWidth: 1,
     borderColor: '#e5e7eb',
-    borderRadius: 30,
-    marginHorizontal: 16,
-    marginTop: 10,
-    marginBottom: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
   },
-  filterToggleText: {
-    flex: 1,
+  filterChipActive: {
+    backgroundColor: '#11269C',
+    borderColor: '#11269C',
+  },
+  filterChipText: {
     fontSize: 13,
     fontWeight: '600',
     color: '#4b5563',
   },
+  filterChipTextActive: {
+    color: '#fff',
+  },
   sectionContainer: {
     paddingHorizontal: 16,
-    marginTop: 28,
+    marginTop: 24,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -825,37 +1099,99 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
+  sectionHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sectionHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: '#111827',
   },
+  subSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 12,
+  },
   sectionBadge: {
-    backgroundColor: '#eef2ff',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 20,
+    borderRadius: 16,
   },
   sectionBadgeText: {
     fontSize: 11,
     fontWeight: '700',
+  },
+  peopleScroll: {
+    marginBottom: 16,
+  },
+  peopleCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    marginRight: 12,
+    width: 220,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  peopleCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  peopleCardTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111827',
+    flex: 1,
+  },
+  peopleBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  peopleBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
     color: '#11269C',
   },
-  fourChartGrid: {
-    flexDirection: isSmallScreen ? 'column' : (isMediumScreen ? 'row' : 'row'),
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    gap: 14,
+  peopleSupervisor: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginBottom: 12,
   },
-  threeChartGrid: {
-    flexDirection: isSmallScreen ? 'column' : (isMediumScreen ? 'row' : 'row'),
-    flexWrap: 'wrap',
+  peopleStats: {
+    flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: 14,
   },
-  twoChartGrid: {
-    flexDirection: isSmallScreen ? 'column' : (isMediumScreen ? 'column' : 'row'),
-    gap: 14,
+  peopleStat: {
+    alignItems: 'center',
+  },
+  peopleStatValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  peopleStatLabel: {
+    fontSize: 10,
+    color: '#6b7280',
+    fontWeight: '500',
   },
   chartCard: {
     backgroundColor: '#fff',
@@ -868,8 +1204,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 2,
-    marginBottom: 14,
-    width: isSmallScreen ? '100%' : (isMediumScreen ? (width / 2 - 22) : (width / 4 - 18)),
+    marginBottom: 16,
   },
   progressCard: {
     minHeight: 100,
@@ -897,9 +1232,6 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  chart: {
-    borderRadius: 16,
   },
   chartFooter: {
     marginTop: 10,
@@ -929,23 +1261,6 @@ const styles = StyleSheet.create({
   },
   legendText: {
     fontSize: 10,
-    color: '#6b7280',
-    fontWeight: '500',
-  },
-  gaugeCenter: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -30 }, { translateY: -20 }],
-    alignItems: 'center',
-  },
-  gaugeValue: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#11269C',
-  },
-  gaugeLabel: {
-    fontSize: 11,
     color: '#6b7280',
     fontWeight: '500',
   },
@@ -1009,6 +1324,63 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#374151',
     fontWeight: '500',
+  },
+  severityContainer: {
+    gap: 12,
+  },
+  severityItem: {
+    marginBottom: 8,
+  },
+  severityHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  severityLabel: {
+    fontSize: 12,
+    color: '#374151',
+    fontWeight: '600',
+  },
+  severityValue: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  criticalText: {
+    color: '#dc2626',
+  },
+  majorText: {
+    color: '#f59e0b',
+  },
+  summaryCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    marginBottom: 16,
+  },
+  summaryItem: {
+    alignItems: 'center',
+  },
+  summaryValue: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#11269C',
+  },
+  summaryLabel: {
+    fontSize: 11,
+    color: '#6b7280',
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  summaryDivider: {
+    width: 1,
+    height: 30,
+    backgroundColor: '#e5e7eb',
   },
   scoreContainer: {
     flexDirection: 'row',

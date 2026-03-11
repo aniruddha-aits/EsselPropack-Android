@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import LinearGradient from 'react-native-linear-gradient';
+import { useNavigation } from '@react-navigation/native';
 
 const { width, height } = Dimensions.get('window');
 
@@ -27,6 +28,8 @@ const WelcomeScreen = ({ onStart, onLogout, userData }) => {
     onLogoutType: typeof onLogout,
     userData 
   });
+  
+  const navigation = useNavigation();
   
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -203,6 +206,28 @@ const WelcomeScreen = ({ onStart, onLogout, userData }) => {
     );
   };
 
+  const handleSafetyTraining = () => {
+    setMenuVisible(false);
+    
+    // Since workers have a different navigation flow, we need to handle this differently
+    // Option 1: Navigate to SafetyTraining if it's in the worker's stack
+    try {
+      navigation.navigate('SafetyTraining');
+    } catch (error) {
+      console.log('SafetyTraining not in current stack, showing alert instead');
+      Alert.alert(
+        'Safety Training',
+        'Training modules will be available soon.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
+  const handleMyProfile = () => {
+    setMenuVisible(false);
+    Alert.alert('Profile', 'Profile screen coming soon');
+  };
+
   const MenuItem = ({ icon, label, onPress, isLogout }) => (
     <TouchableOpacity 
       style={[styles.menuItem, isLogout && styles.logoutMenuItem]} 
@@ -275,18 +300,12 @@ const WelcomeScreen = ({ onStart, onLogout, userData }) => {
             <MenuItem 
               icon="person" 
               label="My Profile" 
-              onPress={() => {
-                setMenuVisible(false);
-                Alert.alert('Profile', 'Navigate to profile');
-              }}
+              onPress={handleMyProfile}
             />
             <MenuItem 
               icon="school" 
               label="Safety Training" 
-              onPress={() => {
-                setMenuVisible(false);
-                Alert.alert('Training', 'Navigate to safety training');
-              }}
+              onPress={handleSafetyTraining}
             />
             <MenuItem 
               icon="exit-to-app" 

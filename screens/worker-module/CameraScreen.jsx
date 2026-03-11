@@ -11,6 +11,8 @@ import {
   Dimensions,
   Animated,
   Easing,
+  ScrollView,
+  FlatList,
 } from 'react-native';
 import { Camera, useCameraDevice, useCameraPermission } from 'react-native-vision-camera';
 import Icon from 'react-native-vector-icons/MaterialIcons';
@@ -25,10 +27,11 @@ const CameraScreen = ({ onNext, onBack }) => {
   const cameraRef = useRef(null);
   const [capturing, setCapturing] = useState(false);
   const { incidentData, updateIncidentData } = useIncident();
-  const [previewUri, setPreviewUri] = useState(incidentData.photo);
+  const [photos, setPhotos] = useState(incidentData.photos || []);
   const [permissionChecked, setPermissionChecked] = useState(false);
   const [flashMode, setFlashMode] = useState('off');
   const [cameraType, setCameraType] = useState('back');
+  const [showGallery, setShowGallery] = useState(false);
   
   // Animation values
   const shutterAnim = useRef(new Animated.Value(0)).current;
@@ -124,8 +127,14 @@ const CameraScreen = ({ onNext, onBack }) => {
       });
       
       const uri = `file://${photo.path}`;
-      setPreviewUri(uri);
-      updateIncidentData('photo', uri);
+      const newPhotos = [...photos, { uri, id: Date.now().toString() }];
+      setPhotos(newPhotos);
+      updateIncidentData('photos', newPhotos);
+      
+      // Show success message
+      Alert.alert('Success', `Photo ${photos.length + 1} captured successfully`, [
+        { text: 'OK' }
+      ]);
     } catch (error) {
       Alert.alert('Error', 'Failed to capture photo');
       console.error(error);
@@ -134,14 +143,34 @@ const CameraScreen = ({ onNext, onBack }) => {
     }
   };
 
-  const handleRetake = () => {
-    setPreviewUri(null);
-    updateIncidentData('photo', null);
+  const handleDeletePhoto = (photoId) => {
+    Alert.alert(
+      'Delete Photo',
+      'Are you sure you want to delete this photo?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            const updatedPhotos = photos.filter(p => p.id !== photoId);
+            setPhotos(updatedPhotos);
+            updateIncidentData('photos', updatedPhotos);
+          }
+        }
+      ]
+    );
   };
 
   const handleConfirm = () => {
-    if (previewUri) {
+    if (photos.length > 0) {
       onNext();
+    } else {
+      Alert.alert(
+        'No Photos',
+        'Please take at least one photo before continuing.',
+        [{ text: 'OK' }]
+      );
     }
   };
 
@@ -177,6 +206,27 @@ const CameraScreen = ({ onNext, onBack }) => {
       default: return 'flash-off';
     }
   };
+
+  // Render photo thumbnail for gallery
+  const renderPhotoThumbnail = ({ item }) => (
+    <View style={styles.thumbnailContainer}>
+      <Image source={{ uri: item.uri }} style={styles.thumbnail} />
+      <TouchableOpacity
+        style={styles.deleteThumbnail}
+        onPress={() => handleDeletePhoto(item.id)}
+      >
+        <LinearGradient
+          colors={['#ff4444', '#cc0000']}
+          style={styles.deleteThumbnailGradient}
+        >
+          <Icon name="close" size={16} color="#fff" />
+        </LinearGradient>
+      </TouchableOpacity>
+      <View style={styles.photoNumberBadge}>
+        <Text style={styles.photoNumberText}>{photos.indexOf(item) + 1}</Text>
+      </View>
+    </View>
+  );
 
   // Permission Screen
   if (shouldShowPermission()) {
@@ -301,58 +351,15 @@ const CameraScreen = ({ onNext, onBack }) => {
     );
   }
 
-  // Preview Screen
-  if (previewUri) {
-    return (
-      <LinearGradient colors={['#f5f7fa', '#e8eaf6']} style={styles.container}>
-        <StepHeader step={1} totalSteps={5} title="Photo Preview" onBack={onBack} />
-        
-        <View style={styles.previewContainer}>
-          <Image source={{ uri: previewUri }} style={styles.preview} resizeMode="cover" />
-          
-          <LinearGradient
-            colors={['transparent', 'rgba(0,0,0,0.7)']}
-            style={styles.previewGradient}
-          >
-            <View style={styles.previewBadge}>
-              <Icon name="check-circle" size={24} color="#4caf50" />
-              <Text style={styles.previewBadgeText}>Photo captured successfully</Text>
-            </View>
-          </LinearGradient>
-        </View>
-
-        <View style={styles.bottomActions}>
-          <TouchableOpacity
-            onPress={handleRetake}
-            style={[styles.actionButton, styles.retakeButton]}
-            activeOpacity={0.8}
-          >
-            <Icon name="refresh" size={24} color='#030e8b' />
-            <Text style={styles.retakeButtonText}>Retake</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            onPress={handleConfirm}
-            style={[styles.actionButton, styles.confirmButton]}
-            activeOpacity={0.8}
-          >
-            <LinearGradient
-              colors={['#030e8b', '#030e8b']}
-              style={styles.confirmButtonGradient}
-            >
-              <Icon name="check" size={24} color="#fff" />
-              <Text style={styles.confirmButtonText}>Confirm</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        </View>
-      </LinearGradient>
-    );
-  }
-
-  // Camera Screen
+  // Camera Screen with Gallery
   return (
     <View style={styles.container}>
-      <StepHeader step={1} totalSteps={5} title="Take Photo" onBack={onBack} />
+      <StepHeader 
+        step={1} 
+        totalSteps={5} 
+        title={photos.length > 0 ? `Photos (${photos.length})` : "Take Photos"} 
+        onBack={onBack} 
+      />
       
       <View style={styles.cameraContainer}>
         <Camera
@@ -401,6 +408,19 @@ const CameraScreen = ({ onNext, onBack }) => {
           >
             <Icon name="flip-camera-ios" size={24} color="#fff" />
           </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.controlButton, styles.galleryButton]}
+            onPress={() => setShowGallery(!showGallery)}
+            activeOpacity={0.7}
+          >
+            <Icon name="photo-library" size={24} color="#fff" />
+            {photos.length > 0 && (
+              <View style={styles.galleryBadge}>
+                <Text style={styles.galleryBadgeText}>{photos.length}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
         </View>
         
         {/* Focus Frame */}
@@ -417,33 +437,89 @@ const CameraScreen = ({ onNext, onBack }) => {
           style={styles.cameraHintContainer}
         >
           <Text style={styles.cameraHint}>
-            <Icon name="info" size={16} color="#fff" /> Position the incident in the frame
+            <Icon name="info" size={16} color="#fff" /> Take multiple photos from different angles
           </Text>
         </LinearGradient>
       </View>
 
-      {/* Capture Button */}
-      <View style={styles.captureRow}>
-        <TouchableOpacity
-          onPress={handleCapture}
-          disabled={capturing}
-          activeOpacity={0.8}
-        >
-          <Animated.View style={[
-            styles.captureBtn,
-            capturing && styles.capturing,
-            { transform: [{ scale: pulseAnim }] }
-          ]}>
+      {/* Gallery Preview */}
+      {showGallery && photos.length > 0 && (
+        <View style={styles.galleryContainer}>
+          <FlatList
+            data={photos}
+            renderItem={renderPhotoThumbnail}
+            keyExtractor={item => item.id}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.galleryList}
+          />
+        </View>
+      )}
+
+      {/* Capture Button and Actions */}
+      <View style={styles.bottomSection}>
+        {photos.length > 0 && (
+          <View style={styles.photoCounter}>
+            <Icon name="photo-camera" size={20} color="#030e8b" />
+            <Text style={styles.photoCounterText}>
+              {photos.length} photo{photos.length !== 1 ? 's' : ''} captured
+            </Text>
+          </View>
+        )}
+
+        <View style={styles.captureRow}>
+          <TouchableOpacity
+            onPress={handleCapture}
+            disabled={capturing}
+            activeOpacity={0.8}
+          >
+            <Animated.View style={[
+              styles.captureBtn,
+              capturing && styles.capturing,
+              { transform: [{ scale: pulseAnim }] }
+            ]}>
+              <LinearGradient
+                colors={['#1a237e', '#283593']}
+                style={styles.captureBtnGradient}
+              >
+                <View style={styles.captureBtnInner} />
+              </LinearGradient>
+            </Animated.View>
+          </TouchableOpacity>
+          
+          <Text style={styles.captureHint}>
+            {capturing ? 'Capturing...' : 'Tap to capture'}
+          </Text>
+        </View>
+
+        {/* Navigation Buttons */}
+        <View style={styles.bottomActions}>
+          <TouchableOpacity
+            onPress={onBack}
+            style={[styles.actionButton, styles.retakeButton]}
+            activeOpacity={0.8}
+          >
+            <Icon name="arrow-back" size={24} color='#030e8b' />
+            <Text style={styles.retakeButtonText}>Back</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            onPress={handleConfirm}
+            style={[styles.actionButton, styles.confirmButton]}
+            activeOpacity={0.8}
+            disabled={photos.length === 0}
+          >
             <LinearGradient
-              colors={['#1a237e', '#283593']}
-              style={styles.captureBtnGradient}
+              colors={photos.length > 0 ? ['#030e8b', '#030e8b'] : ['#cccccc', '#999999']}
+              style={styles.confirmButtonGradient}
             >
-              <View style={styles.captureBtnInner} />
+              <Icon name="check" size={24} color="#fff" />
+              <Text style={styles.confirmButtonText}>
+                Continue ({photos.length})
+              </Text>
             </LinearGradient>
-          </Animated.View>
-        </TouchableOpacity>
-        
-        <Text style={styles.captureHint}>Tap to capture</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -529,6 +605,7 @@ const styles = StyleSheet.create({
   cameraContainer: {
     flex: 1,
     margin: 16,
+    marginBottom: 8,
     borderRadius: 24,
     overflow: 'hidden',
     backgroundColor: '#030e8b',
@@ -566,6 +643,27 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.2)',
+  },
+  galleryButton: {
+    position: 'relative',
+  },
+  galleryBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: '#030e8b',
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  galleryBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
   controlBadge: {
     position: 'absolute',
@@ -648,10 +746,79 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   },
+  // Gallery Styles
+  galleryContainer: {
+    maxHeight: 100,
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  galleryList: {
+    paddingHorizontal: 4,
+  },
+  thumbnailContainer: {
+    marginHorizontal: 4,
+    position: 'relative',
+  },
+  thumbnail: {
+    width: 80,
+    height: 80,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#030e8b',
+  },
+  deleteThumbnail: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    zIndex: 1,
+  },
+  deleteThumbnailGradient: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  photoNumberBadge: {
+    position: 'absolute',
+    bottom: -5,
+    left: -5,
+    backgroundColor: '#030e8b',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  photoNumberText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  // Bottom Section Styles
+  bottomSection: {
+    paddingHorizontal: 16,
+    paddingBottom: 20,
+  },
+  photoCounter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  photoCounterText: {
+    fontSize: 14,
+    color: '#030e8b',
+    fontWeight: '600',
+  },
   captureRow: {
     alignItems: 'center',
-    paddingTop: 20,
-    paddingBottom: 30,
+    paddingVertical: 10,
   },
   captureBtn: {
     width: 80,
@@ -684,57 +851,15 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   captureHint: {
-    marginTop: 12,
+    marginTop: 8,
     color: '#666',
     fontSize: 12,
     fontWeight: '500',
   },
-  // Preview Screen Styles
-  previewContainer: {
-    flex: 1,
-    margin: 16,
-    borderRadius: 24,
-    overflow: 'hidden',
-    backgroundColor: '#030e8b',
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-  },
-  preview: {
-    flex: 1,
-  },
-  previewGradient: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 20,
-    alignItems: 'center',
-  },
-  previewBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 30,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
-  previewBadgeText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-  },
   bottomActions: {
     flexDirection: 'row',
     gap: 12,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 30,
+    marginTop: 10,
   },
   actionButton: {
     flex: 1,
@@ -750,7 +875,7 @@ const styles = StyleSheet.create({
   retakeButton: {
     backgroundColor: '#fff',
     borderWidth: 1,
-    borderColor:'#030e8b',
+    borderColor: '#030e8b',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

@@ -111,19 +111,24 @@ const AppContent = () => {
   const WrappedIncidentManagement = createScreen(IncidentAndInjuryScreen);
   
   // CRITICAL: Create a separate wrapper for Worker module to ensure onLogout is passed
-  const WorkerModuleWrapper = ({ navigation, route }) => {
-    console.log('👷 WorkerModuleWrapper - logout function:', !!logout);
-    return (
-      <AppContentWrapper routeName="WorkerModule">
-        <IncidentReportScreen 
-          navigation={navigation}
-          route={route}
-          userData={user}
-          onLogout={logout} // Pass logout directly
-        />
-      </AppContentWrapper>
-    );
-  };
+// In App.jsx, update the WorkerModuleWrapper to include a nested navigator
+const WorkerModuleWrapper = ({ navigation, route }) => {
+  console.log('👷 WorkerModuleWrapper - logout function:', !!logout);
+  
+  // Create a nested stack for worker screens
+  const WorkerStack = createNativeStackNavigator();
+  
+  return (
+    <AppContentWrapper routeName="WorkerModule">
+      <WorkerStack.Navigator screenOptions={{ headerShown: false }}>
+        <WorkerStack.Screen name="Welcome">
+          {props => <IncidentReportScreen {...props} userData={user} onLogout={logout} />}
+        </WorkerStack.Screen>
+        <WorkerStack.Screen name="SafetyTraining" component={SafetyTrainingScreen} />
+      </WorkerStack.Navigator>
+    </AppContentWrapper>
+  );
+};
 
   return (
     <NavigationContainer>

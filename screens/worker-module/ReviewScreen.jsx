@@ -8,6 +8,9 @@ import {
   Alert,
   Animated,
   TouchableOpacity,
+  FlatList,
+  Modal,
+  Dimensions, // Add this import
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import LinearGradient from 'react-native-linear-gradient';
@@ -15,6 +18,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import StepHeader from './components/StepHeader';
 import PrimaryButton from './components/PrimaryButton';
 import { useIncident } from './context/IncidentContext';
+
+const { width, height } = Dimensions.get('window'); // Add this line
 
 const severityConfig = {
   low: { color: '#4CAF50', label: 'Low', icon: 'check-circle', bgColor: 'rgba(76, 175, 80, 0.1)' },
@@ -25,6 +30,8 @@ const severityConfig = {
 const ReviewScreen = ({ onNext, onBack }) => {
   const { incidentData } = useIncident();
   const [submitting, setSubmitting] = useState(false);
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [modalVisible, setModalVisible] = useState(false);
   
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -52,11 +59,24 @@ const ReviewScreen = ({ onNext, onBack }) => {
     ]).start();
   }, []);
 
+  // Debug log to check what photos are available
+  useEffect(() => {
+    console.log('Incident Data:', incidentData);
+    console.log('Photos:', incidentData.photos);
+    console.log('Single Photo:', incidentData.photo);
+  }, []);
+
   const sevConfig = incidentData.severity ? severityConfig[incidentData.severity] : null;
   
   const locationText = incidentData.location
     ? `${incidentData.location.latitude.toFixed(5)}, ${incidentData.location.longitude.toFixed(5)}`
     : incidentData.manualLocation || 'Not specified';
+
+  // Get photos array (support both single photo and multiple photos)
+  const photos = incidentData.photos || (incidentData.photo ? [{ uri: incidentData.photo, id: '1' }] : []);
+  const hasPhotos = photos.length > 0;
+
+  console.log('Processed Photos:', photos); // Debug log
 
   // Get body parts
   const bodyParts = incidentData.bodyParts || [];
@@ -118,6 +138,34 @@ const ReviewScreen = ({ onNext, onBack }) => {
       setSubmitting(false);
     }
   };
+
+  const openImageModal = (uri) => {
+    setSelectedImage(uri);
+    setModalVisible(true);
+  };
+
+  const renderPhotoThumbnail = ({ item, index }) => (
+    <TouchableOpacity
+      style={styles.photoThumbnail}
+      onPress={() => openImageModal(item.uri)}
+      activeOpacity={0.9}
+    >
+      <Image 
+        source={{ uri: item.uri }} 
+        style={styles.thumbnailImage} 
+        onError={(error) => console.log('Image loading error:', error.nativeEvent.error)}
+      />
+      <LinearGradient
+        colors={['transparent', 'rgba(0,0,0,0.7)']}
+        style={styles.photoOverlay}
+      >
+        <View style={styles.photoNumber}>
+          <Text style={styles.photoNumberText}>{index + 1}</Text>
+        </View>
+        <Icon name="zoom-in" size={16} color="#fff" />
+      </LinearGradient>
+    </TouchableOpacity>
+  );
 
   const renderBodyParts = () => {
     if (hasBodyParts) {
@@ -228,8 +276,8 @@ const ReviewScreen = ({ onNext, onBack }) => {
             ]
           }
         ]}>
-          {/* Photo Card */}
-          {incidentData.photo && (
+          {/* Photos Card - Updated for multiple photos */}
+          {hasPhotos && (
             <LinearGradient
               colors={['#ffffff', '#f8f9ff']}
               style={styles.card}
@@ -239,14 +287,35 @@ const ReviewScreen = ({ onNext, onBack }) => {
                   <View style={[styles.cardIcon, { backgroundColor: '#030e8b' }]}>
                     <Icon name="photo-camera" size={18} color="#fff" />
                   </View>
-                  <Text style={styles.cardTitle}>Incident Photo</Text>
+                  <Text style={styles.cardTitle}>
+                    Incident Photos {photos.length > 0 && `(${photos.length})`}
+                  </Text>
                 </View>
                 <View style={styles.photoBadge}>
                   <Icon name="check-circle" size={16} color="#4CAF50" />
-                  <Text style={styles.photoBadgeText}>Attached</Text>
+                  <Text style={styles.photoBadgeText}>
+                    {photos.length} {photos.length === 1 ? 'photo' : 'photos'}
+                  </Text>
                 </View>
               </View>
-              <Image source={{ uri: incidentData.photo }} style={styles.photo} resizeMode="cover" />
+              
+              {photos.length > 0 ? (
+                <FlatList
+                  data={photos}
+                  renderItem={renderPhotoThumbnail}
+                  keyExtractor={(item, index) => item.id || index.toString()}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.photosList}
+                />
+              ) : (
+                <View style={styles.noPhotosContainer}>
+                  <Icon name="photo" size={40} color="#ccc" />
+                  <Text style={styles.noPhotosText}>No photos available</Text>
+                </View>
+              )}
+              
+              <Text style={styles.photoHint}>Tap any photo to enlarge</Text>
             </LinearGradient>
           )}
 
@@ -370,6 +439,42 @@ const ReviewScreen = ({ onNext, onBack }) => {
         </Animated.View>
       </ScrollView>
 
+      {/* Image Preview Modal */}
+      <Modal
+        visible={modalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <View style={styles.modalContainer}>
+          <TouchableOpacity
+            style={styles.modalCloseButton}
+            onPress={() => setModalVisible(false)}
+          >
+            <LinearGradient
+              colors={['rgba(0,0,0,0.6)', 'rgba(0,0,0,0.8)']}
+              style={styles.modalCloseGradient}
+            >
+              <Icon name="close" size={24} color="#fff" />
+            </LinearGradient>
+          </TouchableOpacity>
+          
+          {selectedImage && (
+            <Image
+              source={{ uri: selectedImage }}
+              style={styles.modalImage}
+              resizeMode="contain"
+            />
+          )}
+          
+          <View style={styles.modalFooter}>
+            <Text style={styles.modalFooterText}>
+              Swipe down or tap close to exit
+            </Text>
+          </View>
+        </View>
+      </Modal>
+
       {/* Footer with Submit Button */}
       <View style={styles.footer}>
         <PrimaryButton
@@ -433,12 +538,61 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#333',
   },
-  // Photo Styles
-  photo: {
+  // Photos Styles
+  photosList: {
+    paddingVertical: 8,
+    gap: 12,
+  },
+  photoThumbnail: {
+    width: 120,
+    height: 120,
+    borderRadius: 12,
+    marginRight: 12,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#fff',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  thumbnailImage: {
     width: '100%',
-    height: 200,
-    borderRadius: 16,
-    marginTop: 4,
+    height: '100%',
+  },
+  photoOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  photoNumber: {
+    backgroundColor: '#030e8b',
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#fff',
+  },
+  photoNumberText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  photoHint: {
+    fontSize: 11,
+    color: '#999',
+    textAlign: 'center',
+    marginTop: 8,
+    fontStyle: 'italic',
   },
   photoBadge: {
     flexDirection: 'row',
@@ -453,6 +607,18 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#4CAF50',
     fontWeight: '500',
+  },
+  noPhotosContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+    backgroundColor: '#f8f9ff',
+    borderRadius: 12,
+  },
+  noPhotosText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#999',
   },
   // Location Styles
   locationContainer: {
@@ -688,6 +854,43 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f7fa',
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
+  },
+  // Modal Styles
+  modalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCloseButton: {
+    position: 'absolute',
+    top: 40,
+    right: 20,
+    zIndex: 10,
+  },
+  modalCloseGradient: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  modalImage: {
+    width: width,
+    height: height * 0.8,
+  },
+  modalFooter: {
+    position: 'absolute',
+    bottom: 40,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  modalFooterText: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
   },
 });
 
