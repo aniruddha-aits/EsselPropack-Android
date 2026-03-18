@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome5';
 import { useNavigation } from '@react-navigation/native';
-import { useAuth } from '../screens/worker-module/context/AuthContext';
+import { useAuth } from './worker-module/context/AuthContext';
 
 const { width } = Dimensions.get('window');
 const isSmallScreen = width < 375;

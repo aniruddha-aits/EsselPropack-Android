@@ -13,7 +13,7 @@ import {
   SafeAreaView,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import { useAuth } from '../screens/worker-module/context/AuthContext'; // Import useAuth
+import { useAuth } from './worker-module/context/AuthContext';
 
 const { width } = Dimensions.get('window');
 const isTablet = width >= 768;

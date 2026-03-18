@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,11 +10,15 @@ import {
   SafeAreaView,
   Platform,
   Modal,
-  FlatList,
+  Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome5';
 import { useNavigation } from '@react-navigation/native';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { pick, types, isCancel } from '@react-native-documents/picker';
+import { auditAPI, attachmentAPI, incidentAPI } from './api/Audit&Inspection/AuditAPI';
 
 const { width, height } = Dimensions.get('window');
 const isSmallScreen = width < 375;
@@ -23,6 +27,12 @@ const isTablet = width >= 768;
 
 const AuditAndInspectionScreen = () => {
   const navigation = useNavigation();
+  
+  // Loading states
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  
+  // Modal and form states
   const [showAuditForm, setShowAuditForm] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
@@ -31,118 +41,110 @@ const AuditAndInspectionScreen = () => {
   const [showTypeDropdown, setShowTypeDropdown] = useState(false);
   const [selectedAudit, setSelectedAudit] = useState(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
-  const [showIncidentDropdown, setShowIncidentDropdown] = useState(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [editingAudit, setEditingAudit] = useState(null);
   
   // Dropdown states for form
   const [showSourceTypeDropdown, setShowSourceTypeDropdown] = useState(false);
   const [showTypePickerDropdown, setShowTypePickerDropdown] = useState(false);
   const [showLocationDropdown, setShowLocationDropdown] = useState(false);
   const [showAuditorDropdown, setShowAuditorDropdown] = useState(false);
+  const [showIncidentDropdown, setShowIncidentDropdown] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
-  // Audit form state
-  const [auditFormData, setAuditFormData] = useState({
-    title: '',
-    sourceType: '',
-    linkedIncident: '',
-    type: '',
-    location: '',
-    auditor: 'Sarah Johnson',
-    scheduledDate: new Date(),
+  // Data states
+  const [audits, setAudits] = useState([]);
+  const [availableIncidents, setAvailableIncidents] = useState([]);
+  const [stats, setStats] = useState({
+    totalAudits: 0,
+    completedAudits: 0,
+    scheduledAudits: 0,
+    inProgress: 0,
+    averageScore: 0
   });
 
-  // Sample audit data
-  const [audits, setAudits] = useState([
-    {
-      id: 'AUD-2024-001',
-      title: 'Slip and Fall in Warehouse B',
-      type: 'Safety',
-      location: 'Building A',
-      auditor: 'Sarah Johnson',
-      scheduledDate: '2024-04-15',
-      status: 'Open',
-      score: '92%',
-      description: 'Comprehensive safety audit of Building A production area.',
-    },
-    {
-      id: 'AUD-2024-002',
-      title: 'Quality Inspection - Warehouse B',
-      type: 'Quality',
-      location: 'Warehouse',
-      auditor: 'Mike Chen',
-      scheduledDate: '2024-04-10',
-      status: 'Investigating',
-      score: '85%',
-      description: 'Quality inspection of stored materials and handling procedures.',
-    },
-    {
-      id: 'AUD-2024-003',
-      title: '5S Housekeeping Audit',
-      type: '5S',
-      location: 'Building B',
-      auditor: 'Lisa Park',
-      scheduledDate: '2024-04-05',
-      status: 'Closed',
-      score: '95%',
-      description: '5S housekeeping and organization audit.',
-    },
-    {
-      id: 'AUD-2024-004',
-      title: 'Environmental Compliance Check',
-      type: 'Environmental',
-      location: 'Office',
-      auditor: 'Sarah Johnson',
-      scheduledDate: '2024-04-01',
-      status: 'Closed',
-      score: '88%',
-      description: 'Environmental compliance and waste management audit.',
-    },
-    {
-      id: 'AUD-2024-005',
-      title: 'Incident Follow-up - Forklift Safety',
-      type: 'Incident Follow-up',
-      location: 'Building A',
-      auditor: 'Mike Chen',
-      scheduledDate: '2024-04-12',
-      status: 'Open',
-      score: '78%',
-      description: 'Follow-up audit for forklift incident investigation.',
-    },
-    {
-      id: 'AUD-2024-006',
-      title: 'Behavioral Safety Observation',
-      type: 'Behavioral',
-      location: 'Building B',
-      auditor: 'Lisa Park',
-      scheduledDate: '2024-04-18',
-      status: 'Scheduled',
-      score: 'Pending',
-      description: 'Behavioral safety observation in production area.',
-    },
-  ]);
+  // File upload state
+  const [uploadedFiles, setUploadedFiles] = useState([]);
 
-  // Sample incidents for linking
-  const availableIncidents = [
-    { id: 'INC-2025-012', title: 'Chemical Spill - 5L solvent', date: '2025-04-01' },
-    { id: 'INC-2025-015', title: 'Slip/Trip - Wet floor', date: '2025-04-05' },
-    { id: 'INC-2025-008', title: 'Near miss - Forklift', date: '2025-03-25' },
-    { id: 'INC-2025-010', title: 'Equipment damage', date: '2025-03-28' },
-    { id: 'INC-2025-018', title: 'First aid - Laceration', date: '2025-04-03' },
-  ];
+  // Audit form state - UPDATED to match backend
+  const [auditFormData, setAuditFormData] = useState({
+    s_title: '',
+    sourceType: '',
+    linkedIncident: '',
+    e_audit_type: '',
+    s_location: '',
+    s_auditor_name: '',
+    dt_scheduled: new Date(),
+    t_description: '',
+  });
 
-  const sourceTypes = [
-    { label: 'None - Standalone Audit', value: '' },
-    { label: 'Link to Incident', value: 'Incident' },
-    { label: 'Routine/Scheduled Audit', value: 'Routine' },
-  ];
+  // Load data on mount
+  useEffect(() => {
+    loadData();
+  }, []);
 
-  const auditTypes = [
-    'Safety', 'Quality', 'Environmental', '5S', 'Behavioral', 'Incident Follow-up'
-  ];
+  // Load data when filters change
+  useEffect(() => {
+    loadAudits();
+  }, [statusFilter, typeFilter, searchTerm]);
 
-  const locations = ['Building A', 'Building B', 'Warehouse', 'Office'];
-  
-  const auditors = ['Sarah Johnson', 'Mike Chen', 'Lisa Park'];
+  const loadData = async () => {
+    await Promise.all([
+      loadAudits(),
+      loadIncidents(),
+      loadStats()
+    ]);
+  };
+
+  const loadAudits = async () => {
+    try {
+      const filters = {};
+      if (statusFilter) filters.status = statusFilter;
+      if (typeFilter) filters.type = typeFilter;
+      if (searchTerm) filters.search = searchTerm;
+
+      const response = await auditAPI.getAll(filters);
+      
+      if (response.success && response.audits) {
+        setAudits(response.audits);
+      }
+    } catch (error) {
+      console.error('Error loading audits:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const loadIncidents = async () => {
+    try {
+      const response = await incidentAPI.getAll();
+      console.log('Incidents response:', response);
+      
+      if (response?.success && Array.isArray(response.incidents)) {
+        setAvailableIncidents(response.incidents);
+      } else {
+        setAvailableIncidents([]);
+      }
+    } catch (error) {
+      console.error('Error loading incidents:', error);
+      setAvailableIncidents([]);
+    }
+  };
+
+  const loadStats = async () => {
+    try {
+      const response = await auditAPI.getStats();
+      if (response.success && response.stats) {
+        setStats(response.stats);
+      }
+    } catch (error) {
+      console.error('Error loading stats:', error);
+    }
+  };
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadData();
+  };
 
   const handleBackPress = () => {
     navigation.goBack();
@@ -155,10 +157,21 @@ const AuditAndInspectionScreen = () => {
     }));
   };
 
+  const handleSourceTypeChange = (value) => {
+    setAuditFormData(prev => ({
+      ...prev,
+      sourceType: value,
+      linkedIncident: value === 'Incident' ? prev.linkedIncident : ''
+    }));
+  };
+
   const handleDateChange = (event, selectedDate) => {
     setShowDatePicker(false);
     if (selectedDate) {
-      handleAuditInputChange('scheduledDate', selectedDate);
+      setAuditFormData(prev => ({
+        ...prev,
+        dt_scheduled: selectedDate
+      }));
     }
   };
 
@@ -166,10 +179,170 @@ const AuditAndInspectionScreen = () => {
     return date.toISOString().split('T')[0];
   };
 
-  const handleAuditSubmit = () => {
-    console.log('Audit scheduled:', auditFormData);
+  const formatDateTime = (dateTimeString) => {
+    if (!dateTimeString) return '';
+    try {
+      const date = new Date(dateTimeString);
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+    } catch (error) {
+      return '';
+    }
+  };
+
+  // Handle file selection
+  const handleFileSelect = async () => {
+    try {
+      const results = await pick({
+        allowMultiSelection: true,
+        type: [types.allFiles],
+      });
+
+      const newFiles = results.map(doc => ({
+        id: `file-${Date.now()}-${Math.random()}`,
+        name: doc.name,
+        size: doc.size,
+        type: doc.type,
+        uri: doc.uri,
+        file: {
+          uri: doc.uri,
+          type: doc.type,
+          name: doc.name,
+        }
+      }));
+
+      setUploadedFiles(prev => [...prev, ...newFiles]);
+    } catch (error) {
+      if (isCancel(error)) {
+        console.log('User cancelled document picker');
+      } else {
+        console.error('Document picker error:', error);
+        Alert.alert('Error', 'Failed to pick document');
+      }
+    }
+  };
+
+  const removeFile = (fileId) => {
+    setUploadedFiles(prev => prev.filter(file => file.id !== fileId));
+  };
+
+  const formatFileSize = (bytes) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const handleSubmit = async () => {
+    // Validate required fields - UPDATED field names
+    if (!auditFormData.s_title || !auditFormData.e_audit_type || !auditFormData.s_location || !auditFormData.s_auditor_name) {
+      Alert.alert('Error', 'Please fill in all required fields');
+      return;
+    }
+
+    setLoading(true);
+
+    // Prepare data for backend - UPDATED to match backend field names
+    const auditData = {
+      s_title: auditFormData.s_title,
+      dt_scheduled: auditFormData.dt_scheduled.toISOString(),
+      s_location: auditFormData.s_location,
+      e_audit_type: auditFormData.e_audit_type,
+      e_severity: 'Minor', // Default severity
+      s_auditor_name: auditFormData.s_auditor_name,
+      s_reporter_name: auditFormData.s_auditor_name, // Using same as auditor
+      fk_linked_incident_id: auditFormData.linkedIncident || null,
+      t_description: auditFormData.t_description || '',
+    };
+
+    try {
+      let response;
+      if (editingAudit) {
+        response = await auditAPI.update(editingAudit.id, auditData);
+      } else {
+        response = await auditAPI.create(auditData);
+      }
+
+      if (response.success) {
+        // Upload files if any
+        if (uploadedFiles.length > 0) {
+          const auditId = editingAudit ? editingAudit.id : response.audit.id;
+          await attachmentAPI.add(auditId, uploadedFiles.map(f => f.file));
+        }
+
+        Alert.alert('Success', editingAudit ? 'Audit updated successfully!' : 'Audit scheduled successfully!');
+        resetForm();
+        await loadData();
+      }
+    } catch (error) {
+      console.error('Error saving audit:', error);
+      Alert.alert('Error', 'Failed to save audit');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetForm = () => {
     setShowAuditForm(false);
-    alert('Audit scheduled successfully!');
+    setEditingAudit(null);
+    setAuditFormData({
+      s_title: '',
+      sourceType: '',
+      linkedIncident: '',
+      e_audit_type: '',
+      s_location: '',
+      s_auditor_name: '',
+      dt_scheduled: new Date(),
+      t_description: '',
+    });
+    setUploadedFiles([]);
+  };
+
+  const handleEditClick = (audit) => {
+    setEditingAudit(audit);
+    setAuditFormData({
+      s_title: audit.s_title,
+      sourceType: audit.fk_linked_incident_id ? 'Incident' : '',
+      linkedIncident: audit.fk_linked_incident_id || '',
+      e_audit_type: audit.e_audit_type,
+      s_location: audit.s_location,
+      s_auditor_name: audit.s_auditor_name,
+      dt_scheduled: new Date(audit.dt_scheduled),
+      t_description: audit.t_description || '',
+    });
+    setShowAuditForm(true);
+    setShowDetailsModal(false);
+  };
+
+  const handleDeleteAudit = async (auditId) => {
+    Alert.alert(
+      'Delete Audit',
+      'Are you sure you want to delete this audit?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await auditAPI.delete(auditId);
+              if (response.success) {
+                Alert.alert('Success', 'Audit deleted successfully');
+                await loadData();
+                setShowDetailsModal(false);
+              }
+            } catch (error) {
+              console.error('Error deleting audit:', error);
+              Alert.alert('Error', 'Failed to delete audit');
+            }
+          }
+        }
+      ]
+    );
   };
 
   const handleViewDetails = (audit) => {
@@ -177,22 +350,26 @@ const AuditAndInspectionScreen = () => {
     setShowDetailsModal(true);
   };
 
+  const handleUpdateStatus = async (auditId, newStatus) => {
+    try {
+      const response = await auditAPI.updateStatus(auditId, newStatus);
+      if (response.success) {
+        await loadAudits();
+        if (selectedAudit && selectedAudit.id === auditId) {
+          setSelectedAudit(prev => ({ ...prev, e_status: newStatus }));
+        }
+      }
+    } catch (error) {
+      console.error('Error updating status:', error);
+    }
+  };
+
   const filterAudits = () => {
-    return audits.filter(audit => {
-      const matchesStatus = !statusFilter || audit.status === statusFilter;
-      const matchesType = !typeFilter || audit.type === typeFilter;
-      const matchesSearch = !searchTerm || 
-        audit.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        audit.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        audit.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        audit.auditor.toLowerCase().includes(searchTerm.toLowerCase());
-      
-      return matchesStatus && matchesType && matchesSearch;
-    });
+    return audits;
   };
 
   const getTypeBadgeStyle = (type) => {
-    switch(type.toLowerCase()) {
+    switch(type?.toLowerCase()) {
       case 'safety':
         return { backgroundColor: '#FDECEA', color: '#E74C3C' };
       case 'quality':
@@ -211,22 +388,20 @@ const AuditAndInspectionScreen = () => {
   };
 
   const getStatusStyle = (status) => {
-    switch(status.toLowerCase()) {
+    switch(status?.toLowerCase()) {
       case 'open':
         return { backgroundColor: '#FEF5E7', color: '#F39C12' };
       case 'investigating':
         return { backgroundColor: '#E8F2FC', color: '#4A90E2' };
       case 'closed':
         return { backgroundColor: '#E8F8F0', color: '#2ECC71' };
-      case 'scheduled':
-        return { backgroundColor: '#E0E7FF', color: '#4F46E5' };
       default:
         return { backgroundColor: '#E8F8F0', color: '#2ECC71' };
     }
   };
 
   const getScoreStyle = (score) => {
-    if (score === 'Pending') return { backgroundColor: '#E5E7EB', color: '#6B7280' };
+    if (!score || score === 'Pending') return { backgroundColor: '#E5E7EB', color: '#6B7280' };
     const scoreNum = parseInt(score);
     if (scoreNum >= 90) return { backgroundColor: '#E8F8F0', color: '#2ECC71' };
     if (scoreNum >= 80) return { backgroundColor: '#E8F2FC', color: '#4A90E2' };
@@ -236,107 +411,86 @@ const AuditAndInspectionScreen = () => {
 
   const filteredAudits = filterAudits();
 
-  const renderAuditCard = ({ item }) => (
-    <TouchableOpacity
-      style={styles.auditCard}
-      activeOpacity={0.7}
-      onPress={() => handleViewDetails(item)}
-    >
-      <View style={styles.cardHeader}>
-        <View style={styles.idContainer}>
-          <Text style={styles.auditId}>{item.id}</Text>
-          <View style={[styles.typeBadge, getTypeBadgeStyle(item.type)]}>
-            <Text style={[styles.badgeText, { color: getTypeBadgeStyle(item.type).color }]}>
-              {item.type}
-            </Text>
-          </View>
-        </View>
-        <View style={[styles.statusBadge, getStatusStyle(item.status)]}>
-          <Text style={[styles.badgeText, { color: getStatusStyle(item.status).color }]}>
-            {item.status}
-          </Text>
-        </View>
-      </View>
-
-      <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
-
-      <View style={styles.cardDetails}>
-        <View style={styles.detailRow}>
-          <Icon name="map-marker-alt" size={12} color="#666" />
-          <Text style={styles.detailLabel}>Location:</Text>
-          <Text style={styles.detailValue}>{item.location}</Text>
-        </View>
-
-        <View style={styles.detailRow}>
-          <Icon name="user" size={12} color="#666" />
-          <Text style={styles.detailLabel}>Auditor:</Text>
-          <Text style={styles.detailValue}>{item.auditor}</Text>
-        </View>
-
-        <View style={styles.detailRow}>
-          <Icon name="calendar" size={12} color="#666" />
-          <Text style={styles.detailLabel}>Date:</Text>
-          <Text style={styles.detailValue}>{item.scheduledDate}</Text>
-        </View>
-
-        <View style={styles.detailRow}>
-          <Icon name="star" size={12} color="#666" />
-          <Text style={styles.detailLabel}>Score:</Text>
-          <View style={[styles.scoreBadge, getScoreStyle(item.score)]}>
-            <Text style={[styles.badgeText, { color: getScoreStyle(item.score).color }]}>
-              {item.score}
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.cardFooter}>
-        <TouchableOpacity 
-          style={styles.actionButton}
-          onPress={() => handleViewDetails(item)}
-        >
-          <Icon name="eye" size={14} color="#11269C" />
-          <Text style={styles.actionButtonText}>View</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton}>
-          <Icon name="edit" size={14} color="#11269C" />
-          <Text style={styles.actionButtonText}>Edit</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton}>
-          <Icon name="play" size={14} color="#11269C" />
-          <Text style={styles.actionButtonText}>Start</Text>
-        </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
-  );
-
   // Dropdown render function
-  const renderDropdown = (items, selectedValue, onSelect, onClose, renderItem) => (
-    <View style={styles.dropdownMenu}>
-      {items.map((item, index) => (
-        <TouchableOpacity
-          key={index}
-          style={styles.dropdownMenuItem}
-          onPress={() => {
-            onSelect(item);
-            onClose();
-          }}
-        >
-          {renderItem ? renderItem(item, selectedValue) : (
-            <Text style={[
-              styles.dropdownMenuItemText,
-              selectedValue === (item.value || item) && styles.dropdownMenuItemSelected
-            ]}>
-              {item.label || item}
-            </Text>
-          )}
-        </TouchableOpacity>
-      ))}
-    </View>
-  );
+  const renderDropdown = (visible, items, onSelect, onClose, selectedValue, renderItem) => {
+    if (!visible) return null;
+    
+    return (
+      <View style={styles.dropdownMenu}>
+        <ScrollView nestedScrollEnabled={true} style={styles.dropdownScroll}>
+          {items.map((item, index) => (
+            <TouchableOpacity
+              key={index}
+              style={[
+                styles.dropdownMenuItem,
+                selectedValue === (item.value || item) && styles.dropdownMenuItemSelected
+              ]}
+              onPress={() => {
+                onSelect(item.value || item);
+                onClose();
+              }}
+            >
+              {renderItem ? renderItem(item, selectedValue) : (
+                <Text style={[
+                  styles.dropdownMenuItemText,
+                  selectedValue === (item.value || item) && styles.dropdownMenuItemTextSelected
+                ]}>
+                  {item.label || item}
+                </Text>
+              )}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+    );
+  };
+
+  // Stats data - UPDATED to match backend response
+  const statsData = [
+    {
+      id: 1,
+      number: stats.totalAudits || 0,
+      label: 'Total Audits',
+      icon: 'clipboard-list',
+      color: '#4A90E2',
+      bgColor: '#E8F2FC'
+    },
+    {
+      id: 2,
+      number: stats.closedAudits || 0,
+      label: 'Completed',
+      icon: 'check-circle',
+      color: '#2ECC71',
+      bgColor: '#E8F8F0'
+    },
+    {
+      id: 3,
+      number: (stats.openAudits || 0) + (stats.investigatingAudits || 0),
+      label: 'In Progress',
+      icon: 'clock',
+      color: '#F39C12',
+      bgColor: '#FEF5E7'
+    },
+    {
+      id: 4,
+      number: stats.averageScore || 0,
+      label: 'Avg. Score',
+      icon: 'star',
+      color: '#4F46E5',
+      bgColor: '#E0E7FF',
+      suffix: '%'
+    }
+  ];
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      {/* Loading Overlay */}
+      {loading && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color="#11269c" />
+        </View>
+      )}
+
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
@@ -345,19 +499,41 @@ const AuditAndInspectionScreen = () => {
         <Text style={styles.headerTitle}>Audit & Inspection</Text>
         <TouchableOpacity 
           style={styles.scheduleButton}
-          onPress={() => setShowAuditForm(true)}
+          onPress={() => {
+            resetForm();
+            setShowAuditForm(true);
+          }}
         >
           <Icon name="plus" size={16} color="#03197a" />
           <Text style={styles.scheduleButtonText}>Schedule</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Main Content - Fixed ScrollView structure */}
+      {/* Main Content */}
       <ScrollView 
         style={styles.mainScrollView}
         showsVerticalScrollIndicator={true}
-        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
       >
+        {/* Stats Cards */}
+        <View style={styles.statsContainer}>
+          {statsData.map(stat => (
+            <View key={stat.id} style={styles.statCard}>
+              <View style={[styles.statIconContainer, { backgroundColor: stat.bgColor }]}>
+                <Icon name={stat.icon} size={20} color={stat.color} />
+              </View>
+              <View style={styles.statContent}>
+                <Text style={styles.statNumber}>
+                  {stat.number}{stat.suffix || ''}
+                </Text>
+                <Text style={styles.statLabel}>{stat.label}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+
         {/* Title Section */}
         <View style={styles.titleSection}>
           <Text style={styles.titleText}>Recent Audits & Inspections</Text>
@@ -380,7 +556,7 @@ const AuditAndInspectionScreen = () => {
           </View>
 
           <View style={styles.filterRow}>
-            {/* Status Filter */}
+            {/* Status Filter - UPDATED: Removed 'Scheduled' */}
             <TouchableOpacity
               style={styles.filterButton}
               onPress={() => setShowStatusDropdown(!showStatusDropdown)}
@@ -403,78 +579,97 @@ const AuditAndInspectionScreen = () => {
             </TouchableOpacity>
           </View>
 
-          {/* Status Dropdown */}
-          {showStatusDropdown && (
-            <View style={styles.dropdown}>
-              <TouchableOpacity
-                style={styles.dropdownItem}
-                onPress={() => {
-                  setStatusFilter('');
-                  setShowStatusDropdown(false);
-                }}
-              >
-                <Text style={[styles.dropdownItemText, !statusFilter && styles.dropdownItemSelected]}>
-                  All Status
-                </Text>
-              </TouchableOpacity>
-              {['Open', 'Investigating', 'Closed', 'Scheduled'].map((status) => (
-                <TouchableOpacity
-                  key={status}
-                  style={styles.dropdownItem}
-                  onPress={() => {
-                    setStatusFilter(status);
-                    setShowStatusDropdown(false);
-                  }}
-                >
-                  <Text style={[
-                    styles.dropdownItemText,
-                    statusFilter === status && styles.dropdownItemSelected
-                  ]}>
-                    {status}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+          {/* Status Dropdown - UPDATED: Removed 'Scheduled' */}
+          {showStatusDropdown && renderDropdown(
+            true,
+            ['Open', 'Investigating', 'Closed'],
+            (value) => {
+              setStatusFilter(value);
+              setShowStatusDropdown(false);
+            },
+            () => setShowStatusDropdown(false),
+            statusFilter
           )}
 
           {/* Type Dropdown */}
-          {showTypeDropdown && (
-            <View style={styles.dropdown}>
-              <TouchableOpacity
-                style={styles.dropdownItem}
-                onPress={() => {
-                  setTypeFilter('');
-                  setShowTypeDropdown(false);
-                }}
-              >
-                <Text style={[styles.dropdownItemText, !typeFilter && styles.dropdownItemSelected]}>
-                  All Types
-                </Text>
-              </TouchableOpacity>
-              {['Safety', 'Quality', 'Environmental', '5S', 'Behavioral', 'Incident Follow-up'].map((type) => (
-                <TouchableOpacity
-                  key={type}
-                  style={styles.dropdownItem}
-                  onPress={() => {
-                    setTypeFilter(type);
-                    setShowTypeDropdown(false);
-                  }}
-                >
-                  <Text style={[
-                    styles.dropdownItemText,
-                    typeFilter === type && styles.dropdownItemSelected
-                  ]}>
-                    {type}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+          {showTypeDropdown && renderDropdown(
+            true,
+            ['Safety', 'Quality', 'Environmental', '5S', 'Behavioral', 'Incident Follow-up'],
+            (value) => {
+              setTypeFilter(value);
+              setShowTypeDropdown(false);
+            },
+            () => setShowTypeDropdown(false),
+            typeFilter
           )}
         </View>
 
         {/* Audit Cards List */}
         <View style={styles.listContainer}>
-          {filteredAudits.map((item) => renderAuditCard({ item }))}
+          {filteredAudits.map((audit) => (
+            <TouchableOpacity
+              key={audit.id}
+              style={styles.auditCard}
+              activeOpacity={0.7}
+              onPress={() => handleViewDetails(audit)}
+            >
+              <View style={styles.cardHeader}>
+                <View style={styles.idContainer}>
+                  <Text style={styles.auditId}>{audit.s_audit_number}</Text>
+                  <View style={[styles.typeBadge, getTypeBadgeStyle(audit.e_audit_type)]}>
+                    <Text style={[styles.badgeText, { color: getTypeBadgeStyle(audit.e_audit_type).color }]}>
+                      {audit.e_audit_type}
+                    </Text>
+                  </View>
+                </View>
+                <View style={[styles.statusBadge, getStatusStyle(audit.e_status)]}>
+                  <Text style={[styles.badgeText, { color: getStatusStyle(audit.e_status).color }]}>
+                    {audit.e_status}
+                  </Text>
+                </View>
+              </View>
+
+              <Text style={styles.cardTitle} numberOfLines={2}>{audit.s_title}</Text>
+
+              <View style={styles.cardDetails}>
+                <View style={styles.detailRow}>
+                  <Icon name="map-marker-alt" size={12} color="#666" />
+                  <Text style={styles.detailLabel}>Location:</Text>
+                  <Text style={styles.detailValue}>{audit.s_location}</Text>
+                </View>
+
+                <View style={styles.detailRow}>
+                  <Icon name="user" size={12} color="#666" />
+                  <Text style={styles.detailLabel}>Auditor:</Text>
+                  <Text style={styles.detailValue}>{audit.s_auditor_name}</Text>
+                </View>
+
+                <View style={styles.detailRow}>
+                  <Icon name="calendar" size={12} color="#666" />
+                  <Text style={styles.detailLabel}>Date:</Text>
+                  <Text style={styles.detailValue}>{formatDateTime(audit.dt_scheduled)}</Text>
+                </View>
+
+                <View style={styles.detailRow}>
+                  <Icon name="star" size={12} color="#666" />
+                  <Text style={styles.detailLabel}>Score:</Text>
+                  <View style={[styles.scoreBadge, getScoreStyle(audit.i_score)]}>
+                    <Text style={[styles.badgeText, { color: getScoreStyle(audit.i_score).color }]}>
+                      {audit.i_score || 'Pending'}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {audit.fk_linked_incident_id && (
+                <View style={styles.linkedIndicator}>
+                  <Icon name="link" size={10} color="#11269C" />
+                  <Text style={styles.linkedText}>Linked to Incident</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          ))}
+          
           {filteredAudits.length === 0 && (
             <View style={styles.emptyState}>
               <Icon name="clipboard-list" size={50} color="#ccc" />
@@ -487,7 +682,7 @@ const AuditAndInspectionScreen = () => {
         <View style={styles.bottomPadding} />
       </ScrollView>
 
-      {/* Schedule Audit Modal */}
+      {/* Schedule/Edit Audit Modal */}
       <Modal
         visible={showAuditForm}
         animationType="slide"
@@ -497,13 +692,15 @@ const AuditAndInspectionScreen = () => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Schedule New Audit</Text>
+              <Text style={styles.modalTitle}>
+                {editingAudit ? 'Edit Audit' : 'Schedule New Audit'}
+              </Text>
               <TouchableOpacity onPress={() => setShowAuditForm(false)}>
                 <Icon name="times" size={20} color="#666" />
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled={true}>
               <View style={styles.modalBody}>
                 {/* Audit Source Section */}
                 <View style={styles.formSection}>
@@ -518,35 +715,35 @@ const AuditAndInspectionScreen = () => {
                       onPress={() => setShowSourceTypeDropdown(!showSourceTypeDropdown)}
                     >
                       <Text style={styles.pickerButtonText}>
-                        {sourceTypes.find(s => s.value === auditFormData.sourceType)?.label || 'None - Standalone Audit'}
+                        {auditFormData.sourceType === 'Incident' ? 'Link to Incident' : 'None - Standalone Audit'}
                       </Text>
                       <Icon name="chevron-down" size={12} color="#666" />
                     </TouchableOpacity>
                     
-                    {showSourceTypeDropdown && (
-                      <View style={styles.modalDropdown}>
-                        {sourceTypes.map((type) => (
-                          <TouchableOpacity
-                            key={type.value}
-                            style={styles.modalDropdownItem}
-                            onPress={() => {
-                              handleAuditInputChange('sourceType', type.value);
-                              setShowSourceTypeDropdown(false);
-                            }}
-                          >
-                            <Text style={[
-                              styles.modalDropdownText,
-                              auditFormData.sourceType === type.value && styles.dropdownItemSelected
-                            ]}>
-                              {type.label}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
+                    {showSourceTypeDropdown && renderDropdown(
+                      true,
+                      [
+                        { label: 'None - Standalone Audit', value: '' },
+                        { label: 'Link to Incident', value: 'Incident' }
+                      ],
+                      (value) => {
+                        handleSourceTypeChange(value);
+                        setShowSourceTypeDropdown(false);
+                      },
+                      () => setShowSourceTypeDropdown(false),
+                      auditFormData.sourceType,
+                      (item) => (
+                        <Text style={[
+                          styles.dropdownMenuItemText,
+                          auditFormData.sourceType === item.value && styles.dropdownMenuItemTextSelected
+                        ]}>
+                          {item.label}
+                        </Text>
+                      )
                     )}
                   </View>
 
-                  {/* Incident Selection - Show when Incident is selected */}
+                  {/* Incident Selection */}
                   {auditFormData.sourceType === 'Incident' && (
                     <View style={styles.formGroup}>
                       <Text style={styles.label}>Select Incident *</Text>
@@ -554,38 +751,35 @@ const AuditAndInspectionScreen = () => {
                         style={styles.pickerButton}
                         onPress={() => setShowIncidentDropdown(!showIncidentDropdown)}
                       >
-                        <Text style={styles.pickerButtonText}>
+                        <Text style={styles.pickerButtonText} numberOfLines={1}>
                           {auditFormData.linkedIncident ? 
-                            availableIncidents.find(i => i.id === auditFormData.linkedIncident)?.id + ' - ' + 
-                            availableIncidents.find(i => i.id === auditFormData.linkedIncident)?.title 
+                            availableIncidents.find(i => i.id === auditFormData.linkedIncident)?.s_incident_number + ' - ' + 
+                            availableIncidents.find(i => i.id === auditFormData.linkedIncident)?.s_title 
                             : 'Select an incident...'}
                         </Text>
                         <Icon name="chevron-down" size={12} color="#666" />
                       </TouchableOpacity>
                       
-                      {showIncidentDropdown && (
-                        <View style={styles.modalDropdown}>
-                          {availableIncidents.map((incident) => (
-                            <TouchableOpacity
-                              key={incident.id}
-                              style={styles.modalDropdownItem}
-                              onPress={() => {
-                                handleAuditInputChange('linkedIncident', incident.id);
-                                setShowIncidentDropdown(false);
-                              }}
-                            >
-                              <View>
-                                <Text style={[
-                                  styles.modalDropdownText,
-                                  auditFormData.linkedIncident === incident.id && styles.dropdownItemSelected
-                                ]}>
-                                  {incident.id} - {incident.title}
-                                </Text>
-                                <Text style={styles.incidentDate}>{incident.date}</Text>
-                              </View>
-                            </TouchableOpacity>
-                          ))}
-                        </View>
+                      {showIncidentDropdown && renderDropdown(
+                        true,
+                        availableIncidents,
+                        (value) => {
+                          handleAuditInputChange('linkedIncident', value);
+                          setShowIncidentDropdown(false);
+                        },
+                        () => setShowIncidentDropdown(false),
+                        auditFormData.linkedIncident,
+                        (incident) => (
+                          <View>
+                            <Text style={[
+                              styles.dropdownMenuItemText,
+                              auditFormData.linkedIncident === incident.id && styles.dropdownMenuItemTextSelected
+                            ]}>
+                              {incident.s_incident_number} - {incident.s_title}
+                            </Text>
+                            <Text style={styles.incidentDate}>{incident.dt_incident}</Text>
+                          </View>
+                        )
                       )}
                       <Text style={styles.helpText}>
                         Audit will be linked to this incident for follow-up investigation
@@ -594,7 +788,7 @@ const AuditAndInspectionScreen = () => {
                   )}
                 </View>
 
-                {/* Audit Details Section */}
+                {/* Audit Details Section - UPDATED field names */}
                 <View style={styles.formSection}>
                   <Text style={styles.sectionTitle}>
                     <Icon name="info-circle" size={14} color="#11269C" /> Audit Details
@@ -606,129 +800,144 @@ const AuditAndInspectionScreen = () => {
                       style={styles.input}
                       placeholder="e.g., Monthly Safety Audit - Building A"
                       placeholderTextColor="#999"
-                      value={auditFormData.title}
-                      onChangeText={(value) => handleAuditInputChange('title', value)}
+                      value={auditFormData.s_title}
+                      onChangeText={(value) => handleAuditInputChange('s_title', value)}
                     />
-                  </View>
-
-                  <View style={styles.formGroup}>
-                    <Text style={styles.label}>Audit Type *</Text>
-                    <TouchableOpacity
-                      style={styles.pickerButton}
-                      onPress={() => setShowTypePickerDropdown(!showTypePickerDropdown)}
-                    >
-                      <Text style={styles.pickerButtonText}>
-                        {auditFormData.type || 'Select Audit Type'}
-                      </Text>
-                      <Icon name="chevron-down" size={12} color="#666" />
-                    </TouchableOpacity>
-                    
-                    {showTypePickerDropdown && (
-                      <View style={styles.modalDropdown}>
-                        {auditTypes.map((type) => (
-                          <TouchableOpacity
-                            key={type}
-                            style={styles.modalDropdownItem}
-                            onPress={() => {
-                              handleAuditInputChange('type', type);
-                              setShowTypePickerDropdown(false);
-                            }}
-                          >
-                            <Text style={[
-                              styles.modalDropdownText,
-                              auditFormData.type === type && styles.dropdownItemSelected
-                            ]}>
-                              {type}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    )}
                   </View>
 
                   <View style={styles.formRow}>
                     <View style={[styles.formGroup, { flex: 1, marginRight: 4 }]}>
+                      <Text style={styles.label}>Audit Type *</Text>
+                      <TouchableOpacity
+                        style={styles.pickerButton}
+                        onPress={() => setShowTypePickerDropdown(!showTypePickerDropdown)}
+                      >
+                        <Text style={styles.pickerButtonText}>
+                          {auditFormData.e_audit_type || 'Select Type'}
+                        </Text>
+                        <Icon name="chevron-down" size={12} color="#666" />
+                      </TouchableOpacity>
+                      
+                      {showTypePickerDropdown && renderDropdown(
+                        true,
+                        ['Safety', 'Quality', 'Environmental', '5S', 'Behavioral', 'Incident Follow-up'],
+                        (value) => {
+                          handleAuditInputChange('e_audit_type', value);
+                          setShowTypePickerDropdown(false);
+                        },
+                        () => setShowTypePickerDropdown(false),
+                        auditFormData.e_audit_type
+                      )}
+                    </View>
+
+                    <View style={[styles.formGroup, { flex: 1, marginLeft: 4 }]}>
                       <Text style={styles.label}>Location *</Text>
                       <TouchableOpacity
                         style={styles.pickerButton}
                         onPress={() => setShowLocationDropdown(!showLocationDropdown)}
                       >
                         <Text style={styles.pickerButtonText}>
-                          {auditFormData.location || 'Select Location'}
+                          {auditFormData.s_location || 'Select Location'}
                         </Text>
                         <Icon name="chevron-down" size={12} color="#666" />
                       </TouchableOpacity>
                       
-                      {showLocationDropdown && (
-                        <View style={styles.modalDropdown}>
-                          {locations.map((loc) => (
-                            <TouchableOpacity
-                              key={loc}
-                              style={styles.modalDropdownItem}
-                              onPress={() => {
-                                handleAuditInputChange('location', loc);
-                                setShowLocationDropdown(false);
-                              }}
-                            >
-                              <Text style={[
-                                styles.modalDropdownText,
-                                auditFormData.location === loc && styles.dropdownItemSelected
-                              ]}>
-                                {loc}
-                              </Text>
-                            </TouchableOpacity>
-                          ))}
-                        </View>
+                      {showLocationDropdown && renderDropdown(
+                        true,
+                        ['Building A', 'Building B', 'Warehouse', 'Office'],
+                        (value) => {
+                          handleAuditInputChange('s_location', value);
+                          setShowLocationDropdown(false);
+                        },
+                        () => setShowLocationDropdown(false),
+                        auditFormData.s_location
                       )}
                     </View>
+                  </View>
 
-                    <View style={[styles.formGroup, { flex: 1, marginLeft: 4 }]}>
+                  <View style={styles.formRow}>
+                    <View style={[styles.formGroup, { flex: 1, marginRight: 4 }]}>
                       <Text style={styles.label}>Auditor *</Text>
                       <TouchableOpacity
                         style={styles.pickerButton}
                         onPress={() => setShowAuditorDropdown(!showAuditorDropdown)}
                       >
                         <Text style={styles.pickerButtonText}>
-                          {auditFormData.auditor}
+                          {auditFormData.s_auditor_name || 'Select Auditor'}
                         </Text>
                         <Icon name="chevron-down" size={12} color="#666" />
                       </TouchableOpacity>
                       
-                      {showAuditorDropdown && (
-                        <View style={styles.modalDropdown}>
-                          {auditors.map((auditor) => (
-                            <TouchableOpacity
-                              key={auditor}
-                              style={styles.modalDropdownItem}
-                              onPress={() => {
-                                handleAuditInputChange('auditor', auditor);
-                                setShowAuditorDropdown(false);
-                              }}
-                            >
-                              <Text style={[
-                                styles.modalDropdownText,
-                                auditFormData.auditor === auditor && styles.dropdownItemSelected
-                              ]}>
-                                {auditor}
-                              </Text>
-                            </TouchableOpacity>
-                          ))}
-                        </View>
+                      {showAuditorDropdown && renderDropdown(
+                        true,
+                        ['Sarah Johnson', 'Mike Chen', 'Lisa Park'],
+                        (value) => {
+                          handleAuditInputChange('s_auditor_name', value);
+                          setShowAuditorDropdown(false);
+                        },
+                        () => setShowAuditorDropdown(false),
+                        auditFormData.s_auditor_name
                       )}
+                    </View>
+
+                    <View style={[styles.formGroup, { flex: 1, marginLeft: 4 }]}>
+                      <Text style={styles.label}>Scheduled Date *</Text>
+                      <TouchableOpacity
+                        style={styles.datePickerButton}
+                        onPress={() => setShowDatePicker(true)}
+                      >
+                        <Text style={styles.dateText}>
+                          {formatDate(auditFormData.dt_scheduled)}
+                        </Text>
+                        <Icon name="calendar" size={16} color="#11269C" />
+                      </TouchableOpacity>
                     </View>
                   </View>
 
                   <View style={styles.formGroup}>
-                    <Text style={styles.label}>Scheduled Date *</Text>
+                    <Text style={styles.label}>Description</Text>
+                    <TextInput
+                      style={[styles.input, styles.textArea]}
+                      placeholder="Enter audit description..."
+                      placeholderTextColor="#999"
+                      value={auditFormData.t_description}
+                      onChangeText={(value) => handleAuditInputChange('t_description', value)}
+                      multiline
+                      numberOfLines={3}
+                      textAlignVertical="top"
+                    />
+                  </View>
+
+                  {/* File Attachments */}
+                  <View style={styles.formGroup}>
+                    <Text style={styles.label}>Attachments</Text>
                     <TouchableOpacity
-                      style={styles.datePickerButton}
-                      onPress={() => setShowDatePicker(true)}
+                      style={styles.uploadButton}
+                      onPress={handleFileSelect}
                     >
-                      <Text style={styles.dateText}>
-                        {formatDate(auditFormData.scheduledDate)}
-                      </Text>
-                      <Icon name="calendar" size={16} color="#11269C" />
+                      <Icon name="paperclip" size={16} color="#11269C" />
+                      <Text style={styles.uploadButtonText}>Choose Files</Text>
                     </TouchableOpacity>
+                    
+                    {uploadedFiles.length > 0 && (
+                      <View style={styles.fileList}>
+                        {uploadedFiles.map(file => (
+                          <View key={file.id} style={styles.fileItem}>
+                            <View style={styles.fileInfo}>
+                              <Icon name="file" size={14} color="#11269C" />
+                              <Text style={styles.fileName} numberOfLines={1}>{file.name}</Text>
+                              <Text style={styles.fileSize}>{formatFileSize(file.size)}</Text>
+                            </View>
+                            <TouchableOpacity
+                              style={styles.removeFileButton}
+                              onPress={() => removeFile(file.id)}
+                            >
+                              <Icon name="times" size={12} color="#E74C3C" />
+                            </TouchableOpacity>
+                          </View>
+                        ))}
+                      </View>
+                    )}
                   </View>
                 </View>
               </View>
@@ -736,15 +945,22 @@ const AuditAndInspectionScreen = () => {
               <View style={styles.modalActions}>
                 <TouchableOpacity 
                   style={[styles.modalButton, styles.modalButtonSecondary]}
-                  onPress={() => setShowAuditForm(false)}
+                  onPress={resetForm}
                 >
                   <Text style={styles.modalButtonTextSecondary}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity 
                   style={[styles.modalButton, styles.modalButtonPrimary]}
-                  onPress={handleAuditSubmit}
+                  onPress={handleSubmit}
+                  disabled={loading}
                 >
-                  <Text style={styles.modalButtonText}>Schedule Audit</Text>
+                  {loading ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.modalButtonText}>
+                      {editingAudit ? 'Update Audit' : 'Schedule Audit'}
+                    </Text>
+                  )}
                 </TouchableOpacity>
               </View>
             </ScrollView>
@@ -755,7 +971,7 @@ const AuditAndInspectionScreen = () => {
       {/* Date Picker */}
       {showDatePicker && (
         <DateTimePicker
-          value={auditFormData.scheduledDate}
+          value={auditFormData.dt_scheduled}
           mode="date"
           display={Platform.OS === 'ios' ? 'spinner' : 'default'}
           onChange={handleDateChange}
@@ -783,70 +999,112 @@ const AuditAndInspectionScreen = () => {
                 <View style={styles.modalBody}>
                   <View style={styles.modalRow}>
                     <Text style={styles.modalLabel}>Audit ID:</Text>
-                    <Text style={styles.modalValue}>{selectedAudit.id}</Text>
+                    <Text style={styles.modalValue}>{selectedAudit.s_audit_number}</Text>
                   </View>
 
                   <View style={styles.modalRow}>
                     <Text style={styles.modalLabel}>Title:</Text>
-                    <Text style={styles.modalValue}>{selectedAudit.title}</Text>
+                    <Text style={styles.modalValue}>{selectedAudit.s_title}</Text>
                   </View>
 
                   <View style={styles.modalRow}>
                     <Text style={styles.modalLabel}>Type:</Text>
-                    <View style={[styles.typeBadge, getTypeBadgeStyle(selectedAudit.type)]}>
-                      <Text style={[styles.badgeText, { color: getTypeBadgeStyle(selectedAudit.type).color }]}>
-                        {selectedAudit.type}
+                    <View style={[styles.typeBadge, getTypeBadgeStyle(selectedAudit.e_audit_type)]}>
+                      <Text style={[styles.badgeText, { color: getTypeBadgeStyle(selectedAudit.e_audit_type).color }]}>
+                        {selectedAudit.e_audit_type}
                       </Text>
                     </View>
                   </View>
 
                   <View style={styles.modalRow}>
                     <Text style={styles.modalLabel}>Location:</Text>
-                    <Text style={styles.modalValue}>{selectedAudit.location}</Text>
+                    <Text style={styles.modalValue}>{selectedAudit.s_location}</Text>
                   </View>
 
                   <View style={styles.modalRow}>
                     <Text style={styles.modalLabel}>Auditor:</Text>
-                    <Text style={styles.modalValue}>{selectedAudit.auditor}</Text>
+                    <Text style={styles.modalValue}>{selectedAudit.s_auditor_name}</Text>
                   </View>
 
                   <View style={styles.modalRow}>
                     <Text style={styles.modalLabel}>Date:</Text>
-                    <Text style={styles.modalValue}>{selectedAudit.scheduledDate}</Text>
+                    <Text style={styles.modalValue}>{formatDateTime(selectedAudit.dt_scheduled)}</Text>
                   </View>
 
                   <View style={styles.modalRow}>
                     <Text style={styles.modalLabel}>Status:</Text>
-                    <View style={[styles.statusBadge, getStatusStyle(selectedAudit.status)]}>
-                      <Text style={[styles.badgeText, { color: getStatusStyle(selectedAudit.status).color }]}>
-                        {selectedAudit.status}
+                    <View style={[styles.statusBadge, getStatusStyle(selectedAudit.e_status)]}>
+                      <Text style={[styles.badgeText, { color: getStatusStyle(selectedAudit.e_status).color }]}>
+                        {selectedAudit.e_status}
                       </Text>
                     </View>
                   </View>
 
                   <View style={styles.modalRow}>
                     <Text style={styles.modalLabel}>Score:</Text>
-                    <View style={[styles.scoreBadge, getScoreStyle(selectedAudit.score)]}>
-                      <Text style={[styles.badgeText, { color: getScoreStyle(selectedAudit.score).color }]}>
-                        {selectedAudit.score}
+                    <View style={[styles.scoreBadge, getScoreStyle(selectedAudit.i_score)]}>
+                      <Text style={[styles.badgeText, { color: getScoreStyle(selectedAudit.i_score).color }]}>
+                        {selectedAudit.i_score || 'Pending'}
                       </Text>
                     </View>
                   </View>
 
+                  {selectedAudit.t_description && (
+                    <View style={styles.modalRow}>
+                      <Text style={styles.modalLabel}>Description:</Text>
+                      <Text style={styles.modalValue}>{selectedAudit.t_description}</Text>
+                    </View>
+                  )}
+
+                  {selectedAudit.fk_linked_incident_id && (
+                    <View style={styles.linkedPreview}>
+                      <View style={styles.previewHeader}>
+                        <Icon name="link" size={12} color="#11269C" />
+                        <Text style={styles.previewHeaderText}>Linked Incident</Text>
+                      </View>
+                      <Text style={styles.previewContent}>
+                        Incident ID: {selectedAudit.fk_linked_incident_id}
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Status Update - UPDATED: Removed 'Scheduled' */}
                   <View style={styles.modalRow}>
-                    <Text style={styles.modalLabel}>Description:</Text>
-                    <Text style={styles.modalValue}>{selectedAudit.description}</Text>
+                    <Text style={styles.modalLabel}>Update Status:</Text>
+                    <View style={styles.statusUpdateContainer}>
+                      {['Open', 'Investigating', 'Closed'].map((status) => (
+                        <TouchableOpacity
+                          key={status}
+                          style={[
+                            styles.statusOption,
+                            getStatusStyle(status),
+                            selectedAudit.e_status === status && styles.statusOptionSelected
+                          ]}
+                          onPress={() => handleUpdateStatus(selectedAudit.id, status)}
+                        >
+                          <Text style={[styles.statusOptionText, { color: getStatusStyle(status).color }]}>
+                            {status}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
                   </View>
                 </View>
 
                 <View style={styles.modalActions}>
-                  <TouchableOpacity style={[styles.modalButton, styles.modalButtonPrimary]}>
-                    <Icon name="check" size={16} color="#fff" />
-                    <Text style={styles.modalButtonText}>Start Audit</Text>
+                  <TouchableOpacity 
+                    style={[styles.modalButton, styles.modalButtonPrimary]}
+                    onPress={() => handleEditClick(selectedAudit)}
+                  >
+                    <Icon name="edit" size={16} color="#fff" />
+                    <Text style={styles.modalButtonText}>Edit</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[styles.modalButton, styles.modalButtonSecondary]}>
-                    <Icon name="edit" size={16} color="#11269C" />
-                    <Text style={styles.modalButtonTextSecondary}>Edit</Text>
+                  <TouchableOpacity 
+                    style={[styles.modalButton, styles.modalButtonDanger]}
+                    onPress={() => handleDeleteAudit(selectedAudit.id)}
+                  >
+                    <Icon name="trash-alt" size={16} color="#fff" />
+                    <Text style={styles.modalButtonText}>Delete</Text>
                   </TouchableOpacity>
                 </View>
               </ScrollView>
@@ -858,6 +1116,7 @@ const AuditAndInspectionScreen = () => {
   );
 };
 
+// Styles remain the same as your original code
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -901,8 +1160,60 @@ const styles = StyleSheet.create({
   mainScrollView: {
     flex: 1,
   },
-  scrollContent: {
-    paddingBottom: 20,
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9999,
+  },
+  statsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    gap: 12,
+  },
+  statCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    width: (width - 44) / 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  statIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  statContent: {
+    flex: 1,
+  },
+  statNumber: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#11269C',
+  },
+  statLabel: {
+    fontSize: 10,
+    color: '#64748b',
+    fontWeight: '600',
+    textTransform: 'uppercase',
   },
   titleSection: {
     backgroundColor: '#11269C',
@@ -978,9 +1289,9 @@ const styles = StyleSheet.create({
     color: '#333',
     fontWeight: '500',
   },
-  dropdown: {
+  dropdownMenu: {
     position: 'absolute',
-    top: 180,
+    top: 240,
     left: 16,
     right: 16,
     backgroundColor: '#fff',
@@ -993,17 +1304,24 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
     zIndex: 1000,
+    maxHeight: 200,
   },
-  dropdownItem: {
+  dropdownScroll: {
+    maxHeight: 150,
+  },
+  dropdownMenuItem: {
     padding: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
   },
-  dropdownItemText: {
+  dropdownMenuItemSelected: {
+    backgroundColor: '#f0f3ff',
+  },
+  dropdownMenuItemText: {
     fontSize: 14,
     color: '#333',
   },
-  dropdownItemSelected: {
+  dropdownMenuItemTextSelected: {
     color: '#11269C',
     fontWeight: '600',
   },
@@ -1034,6 +1352,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flex: 1,
   },
   auditId: {
     fontSize: 14,
@@ -1062,7 +1381,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   cardDetails: {
-    marginBottom: 12,
+    marginBottom: 8,
     gap: 6,
   },
   detailRow: {
@@ -1086,26 +1405,19 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 12,
   },
-  cardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
-  },
-  actionButton: {
+  linkedIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    backgroundColor: '#f5f7fa',
-    borderRadius: 6,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
   },
-  actionButtonText: {
-    fontSize: 12,
+  linkedText: {
+    fontSize: 11,
     color: '#11269C',
-    fontWeight: '600',
+    fontWeight: '500',
   },
   emptyState: {
     alignItems: 'center',
@@ -1157,9 +1469,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#11269C',
     marginBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
   },
   formGroup: {
     marginBottom: 12,
@@ -1177,6 +1486,10 @@ const styles = StyleSheet.create({
     padding: 12,
     fontSize: 14,
     backgroundColor: '#f5f7fa',
+  },
+  textArea: {
+    minHeight: 80,
+    textAlignVertical: 'top',
   },
   pickerButton: {
     flexDirection: 'row',
@@ -1207,117 +1520,74 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#333',
   },
-  modalDropdown: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    marginTop: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    maxHeight: 200,
-  },
-  modalDropdownItem: {
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  modalDropdownText: {
-    fontSize: 14,
-    color: '#333',
-  },
-  incidentPicker: {
-    gap: 8,
-  },
-  incidentOption: {
-    padding: 10,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 8,
-    backgroundColor: '#f5f7fa',
-  },
-  incidentOptionSelected: {
-    backgroundColor: '#11269C',
-    borderColor: '#11269C',
-  },
-  incidentOptionText: {
-    fontSize: 13,
-    color: '#333',
-    marginBottom: 2,
-  },
-  incidentOptionTextSelected: {
-    color: '#fff',
-  },
   incidentDate: {
     fontSize: 11,
     color: '#666',
     marginTop: 2,
   },
   helpText: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#6b7280',
     marginTop: 4,
+  },
+  uploadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#f5f7fa',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#11269C',
+    borderStyle: 'dashed',
+  },
+  uploadButtonText: {
+    color: '#11269C',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  fileList: {
+    marginTop: 8,
+    gap: 8,
+  },
+  fileItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 8,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  fileInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  fileName: {
+    fontSize: 12,
+    color: '#333',
+    flex: 1,
+  },
+  fileSize: {
+    fontSize: 10,
+    color: '#999',
+  },
+  removeFileButton: {
+    padding: 4,
   },
   formRow: {
     flexDirection: 'row',
     marginBottom: 12,
   },
-  typePicker: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  typeOption: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#f5f7fa',
-  },
-  typeOptionSelected: {
-    backgroundColor: '#11269C',
-    borderColor: '#11269C',
-  },
-  typeOptionText: {
-    fontSize: 12,
-    color: '#333',
-  },
-  typeOptionTextSelected: {
-    color: '#fff',
-  },
-  pickerContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  pickerOption: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#f5f7fa',
-  },
-  pickerOptionSelected: {
-    backgroundColor: '#11269C',
-    borderColor: '#11269C',
-  },
-  pickerOptionText: {
-    fontSize: 12,
-    color: '#333',
-  },
-  pickerOptionTextSelected: {
-    color: '#fff',
-  },
   modalRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 8,
-    marginBottom: 8,
+    marginBottom: 12,
   },
   modalLabel: {
     width: 80,
@@ -1329,6 +1599,50 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     color: '#333',
+  },
+  linkedPreview: {
+    marginTop: 8,
+    padding: 12,
+    backgroundColor: '#f0f5ff',
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#11269C',
+  },
+  previewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  previewHeaderText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#11269C',
+  },
+  previewContent: {
+    fontSize: 12,
+    color: '#374151',
+  },
+  statusUpdateContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 4,
+    flexWrap: 'wrap',
+  },
+  statusOption: {
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  statusOptionSelected: {
+    borderColor: '#11269C',
+    borderWidth: 2,
+  },
+  statusOptionText: {
+    fontSize: 10,
+    fontWeight: '600',
   },
   modalActions: {
     flexDirection: 'row',
@@ -1354,6 +1668,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#11269C',
   },
+  modalButtonDanger: {
+    backgroundColor: '#E74C3C',
+  },
   modalButtonText: {
     color: '#fff',
     fontSize: 14,
@@ -1365,4 +1682,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
 export default AuditAndInspectionScreen;

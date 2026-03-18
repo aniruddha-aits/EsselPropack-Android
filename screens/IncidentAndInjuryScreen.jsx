@@ -16,14 +16,16 @@ import {
   ActivityIndicator,
   RefreshControl,
   Image,
+  PermissionsAndroid,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome5';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import ImagePicker from 'react-native-image-crop-picker';
 import { pick, types } from '@react-native-documents/picker';
+import Geolocation from 'react-native-geolocation-service';
 import RNFS from 'react-native-fs';
-import { useAuth } from './worker-module/context/AuthContext'; // Adjust the path based on your project structure
+import { useAuth } from './worker-module/context/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Import API
@@ -37,17 +39,17 @@ import {
 
 const { width, height } = Dimensions.get('window');
 const isSmallScreen = width < 375;
-const isMediumScreen = width >= 375 && width < 768;
-const isTablet = width >= 768;
 
 const IncidentAndInjuryScreen = () => {
   const navigation = useNavigation();
   
-const { user, isAuthenticated, logout } = useAuth(); // Get auth from context
+  const { user, isAuthenticated, logout } = useAuth();
+  
   // Loading states
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(false);
   
   // API Data states
   const [incidents, setIncidents] = useState([]);
@@ -81,10 +83,12 @@ const { user, isAuthenticated, logout } = useAuth(); // Get auth from context
   const [showPersonTypeDropdown, setShowPersonTypeDropdown] = useState(false);
   const [showDepartmentDropdown, setShowDepartmentDropdown] = useState(false);
 
-  // Date picker states
+  // Date picker states - FIXED
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
   const [tempDate, setTempDate] = useState(new Date());
-  const [showIOSDatePicker, setShowIOSDatePicker] = useState(false);
+  const [showIOSPicker, setShowIOSPicker] = useState(false);
+  const [pickerMode, setPickerMode] = useState('date'); // 'date' or 'time' or 'datetime'
 
   // Form data
   const [incidentFormData, setIncidentFormData] = useState({
@@ -199,19 +203,17 @@ const { user, isAuthenticated, logout } = useAuth(); // Get auth from context
 
   const allBodyParts = [...frontBodyParts, ...backBodyParts, ...bodyParts];
 
- 
- // Load data when screen comes into focus
-useFocusEffect(
-  useCallback(() => {
-    if (isAuthenticated) {
-      loadData();
-    } else {
-      setInitialLoading(false); // Set loading to false if not authenticated
-    }
-  }, [isAuthenticated])
-);
+  // Load data when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      if (isAuthenticated) {
+        loadData();
+      } else {
+        setInitialLoading(false);
+      }
+    }, [isAuthenticated])
+  );
 
- 
   // Load all data
   const loadData = async () => {
     await Promise.all([
@@ -261,7 +263,7 @@ useFocusEffect(
       console.error('Error loading incidents:', error);
       if (error.response?.status === 401) {
         Alert.alert('Session Expired', 'Please log in again.');
-        setIsAuthenticated(false);
+        logout();
       } else {
         Alert.alert('Error', 'Failed to load incidents');
       }
@@ -524,29 +526,84 @@ useFocusEffect(
     }
   };
 
-  // Get current location
-  const getCurrentLocation = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setLocationCoordinates({
-            latitude: position.coords.latitude.toString(),
-            longitude: position.coords.longitude.toString(),
-          });
-          setIncidentFormData(prev => ({
-            ...prev,
-            latitude: position.coords.latitude.toString(),
-            longitude: position.coords.longitude.toString(),
-          }));
-          Alert.alert('Success', 'Location captured successfully!');
-        },
-        (error) => {
-          Alert.alert('Error', 'Error getting location: ' + error.message);
+  // Request location permission for Android
+  const requestLocationPermission = async () => {
+    if (Platform.OS === 'ios') {
+      return true;
+    }
+    
+    try {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+        {
+          title: 'Location Permission',
+          message: 'This app needs access to your location to capture incident location.',
+          buttonNeutral: 'Ask Me Later',
+          buttonNegative: 'Cancel',
+          buttonPositive: 'OK',
         }
       );
-    } else {
-      Alert.alert('Error', 'Geolocation is not supported by this device.');
+      return granted === PermissionsAndroid.RESULTS.GRANTED;
+    } catch (err) {
+      console.warn(err);
+      return false;
     }
+  };
+
+  // Get current location - FIXED with proper geolocation
+  const getCurrentLocation = async () => {
+    const hasPermission = await requestLocationPermission();
+    
+    if (!hasPermission) {
+      Alert.alert('Permission Denied', 'Location permission is required to get current location.');
+      return;
+    }
+
+    setLocationLoading(true);
+    
+    Geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        setLocationCoordinates({
+          latitude: latitude.toString(),
+          longitude: longitude.toString(),
+        });
+        setIncidentFormData(prev => ({
+          ...prev,
+          latitude: latitude.toString(),
+          longitude: longitude.toString(),
+        }));
+        setLocationLoading(false);
+        Alert.alert('Success', 'Location captured successfully!');
+      },
+      (error) => {
+        console.error('Location error:', error);
+        let errorMessage = 'Failed to get location';
+        
+        switch (error.code) {
+          case 1:
+            errorMessage = 'Location permission denied';
+            break;
+          case 2:
+            errorMessage = 'Location unavailable';
+            break;
+          case 3:
+            errorMessage = 'Location request timed out';
+            break;
+        }
+        
+        Alert.alert('Error', errorMessage);
+        setLocationLoading(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 30000,
+        maximumAge: 10000,
+        distanceFilter: 0,
+        forceRequestLocation: true,
+        showLocationDialog: true,
+      }
+    );
   };
 
   // Handle image picker
@@ -585,41 +642,39 @@ useFocusEffect(
     }
   };
 
-// Handle document picker - UPDATED for new package
-const handleDocumentPicker = async () => {
-  try {
-    // The new package returns an array even for single files
-    const results = await pick({
-      allowMultiSelection: true,
-      type: [types.allFiles], // or specify specific types like [types.pdf, types.images]
-    });
+  // Handle document picker
+  const handleDocumentPicker = async () => {
+    try {
+      const results = await pick({
+        allowMultiSelection: true,
+        type: [types.allFiles],
+      });
 
-    const newDocuments = results.map(doc => ({
-      id: `doc-${Date.now()}-${Math.random()}`,
-      name: doc.name,
-      size: doc.size,
-      type: doc.type,
-      file: {
-        uri: doc.uri,
-        type: doc.type,
+      const newDocuments = results.map(doc => ({
+        id: `doc-${Date.now()}-${Math.random()}`,
         name: doc.name,
         size: doc.size,
-      },
-      uploadDate: new Date().toISOString()
-    }));
+        type: doc.type,
+        file: {
+          uri: doc.uri,
+          type: doc.type,
+          name: doc.name,
+          size: doc.size,
+        },
+        uploadDate: new Date().toISOString()
+      }));
 
-    setUploadedDocuments(prev => [...prev, ...newDocuments]);
-  } catch (error) {
-    // Check if user cancelled (error.code is now different)
-    if (error.code === 'DOCUMENT_PICKER_CANCELED') {
-      // User cancelled - ignore
-      console.log('User cancelled document picker');
-    } else {
-      console.error('Document picker error:', error);
-      Alert.alert('Error', 'Failed to pick document');
+      setUploadedDocuments(prev => [...prev, ...newDocuments]);
+    } catch (error) {
+      if (error.code === 'DOCUMENT_PICKER_CANCELED') {
+        console.log('User cancelled document picker');
+      } else {
+        console.error('Document picker error:', error);
+        Alert.alert('Error', 'Failed to pick document');
+      }
     }
-  }
-};
+  };
+
   // Remove image
   const removeImage = (imageId) => {
     setUploadedImages(prev => prev.filter(img => img.id !== imageId));
@@ -728,12 +783,36 @@ const handleDocumentPicker = async () => {
     }));
   };
 
-  // Handle date change
+  // FIXED: Date/Time picker functions
+  const showDatepicker = () => {
+    setTempDate(incidentFormData.dateTime);
+    if (Platform.OS === 'ios') {
+      setPickerMode('date');
+      setShowIOSPicker(true);
+    } else {
+      setShowDatePicker(true);
+    }
+  };
+
+  const showTimepicker = () => {
+    setTempDate(incidentFormData.dateTime);
+    if (Platform.OS === 'ios') {
+      setPickerMode('time');
+      setShowIOSPicker(true);
+    } else {
+      setShowTimePicker(true);
+    }
+  };
+
   const onDateChange = (event, selectedDate) => {
     if (Platform.OS === 'android') {
       setShowDatePicker(false);
+      setShowTimePicker(false);
       if (event.type === 'set' && selectedDate) {
-        handleIncidentInputChange('dateTime', selectedDate);
+        const currentDate = incidentFormData.dateTime;
+        const newDate = selectedDate;
+        newDate.setHours(currentDate.getHours(), currentDate.getMinutes());
+        handleIncidentInputChange('dateTime', newDate);
       }
     } else {
       if (selectedDate) {
@@ -742,16 +821,24 @@ const handleDocumentPicker = async () => {
     }
   };
 
-  // Handle date confirm for iOS
-  const handleDateConfirm = () => {
-    handleIncidentInputChange('dateTime', tempDate);
-    setShowIOSDatePicker(false);
+  const onTimeChange = (event, selectedTime) => {
+    if (Platform.OS === 'android') {
+      setShowTimePicker(false);
+      if (event.type === 'set' && selectedTime) {
+        const currentDate = incidentFormData.dateTime;
+        currentDate.setHours(selectedTime.getHours(), selectedTime.getMinutes());
+        handleIncidentInputChange('dateTime', new Date(currentDate));
+      }
+    }
   };
 
-  // Handle date cancel
-  const handleDateCancel = () => {
-    setShowIOSDatePicker(false);
-    setShowDatePicker(false);
+  const handleIOSConfirm = () => {
+    handleIncidentInputChange('dateTime', tempDate);
+    setShowIOSPicker(false);
+  };
+
+  const handleIOSCancel = () => {
+    setShowIOSPicker(false);
   };
 
   // Format date for display
@@ -762,6 +849,21 @@ const handleDocumentPicker = async () => {
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit'
+    });
+  };
+
+  const formatDate = (date) => {
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  };
+
+  const formatTime = (date) => {
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
     });
   };
 
@@ -1258,33 +1360,34 @@ const handleDocumentPicker = async () => {
     </TouchableOpacity>
   );
 
- // Authentication check - now using context
-if (!isAuthenticated && !initialLoading) {
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="arrow-left" size={20} color="#fdfdfe" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Incident & Injury</Text>
-        <View style={{ width: 40 }} />
-      </View>
-      <View style={styles.authErrorContainer}>
-        <Icon name="exclamation-triangle" size={50} color="#f39c12" />
-        <Text style={styles.authErrorTitle}>Authentication Required</Text>
-        <Text style={styles.authErrorMessage}>
-          Please log in to access the Incident & Injury Management system.
-        </Text>
-        <TouchableOpacity
-          style={styles.authButton}
-          onPress={() => navigation.navigate('Login')}
-        >
-          <Text style={styles.authButtonText}>Go to Login</Text>
-        </TouchableOpacity>
-      </View>
-    </SafeAreaView>
-  );
-}
+  // Authentication check - now using context
+  if (!isAuthenticated && !initialLoading) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Icon name="arrow-left" size={20} color="#fdfdfe" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Incident & Injury</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={styles.authErrorContainer}>
+          <Icon name="exclamation-triangle" size={50} color="#f39c12" />
+          <Text style={styles.authErrorTitle}>Authentication Required</Text>
+          <Text style={styles.authErrorMessage}>
+            Please log in to access the Incident & Injury Management system.
+          </Text>
+          <TouchableOpacity
+            style={styles.authButton}
+            onPress={() => navigation.navigate('Login')}
+          >
+            <Text style={styles.authButtonText}>Go to Login</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       {/* Loading Overlay */}
@@ -1519,25 +1622,26 @@ if (!isAuthenticated && !initialLoading) {
                   />
                 </View>
 
-                {/* Date & Time */}
+                {/* Date & Time - FIXED with separate date and time pickers */}
                 <View style={styles.formGroup}>
                   <Text style={styles.label}>Date & Time <Text style={styles.required}>*</Text></Text>
-                  <TouchableOpacity 
-                    style={styles.datePickerButton}
-                    onPress={() => {
-                      if (Platform.OS === 'ios') {
-                        setTempDate(incidentFormData.dateTime);
-                        setShowIOSDatePicker(true);
-                      } else {
-                        setShowDatePicker(true);
-                      }
-                    }}
-                  >
-                    <Text style={styles.dateText}>
-                      {formatDateForDisplay(incidentFormData.dateTime)}
-                    </Text>
-                    <Icon name="calendar" size={16} color="#11269C" />
-                  </TouchableOpacity>
+                  <View style={styles.dateTimeRow}>
+                    <TouchableOpacity
+                      style={[styles.datePickerButton, { flex: 1, marginRight: 4 }]}
+                      onPress={showDatepicker}
+                    >
+                      <Text style={styles.dateText}>{formatDate(incidentFormData.dateTime)}</Text>
+                      <Icon name="calendar" size={14} color="#11269C" />
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      style={[styles.datePickerButton, { flex: 1, marginLeft: 4 }]}
+                      onPress={showTimepicker}
+                    >
+                      <Text style={styles.dateText}>{formatTime(incidentFormData.dateTime)}</Text>
+                      <Icon name="clock" size={14} color="#11269C" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 {/* Location Dropdown */}
@@ -1561,7 +1665,7 @@ if (!isAuthenticated && !initialLoading) {
                   )}
                 </View>
 
-                {/* Location Coordinates */}
+                {/* Location Coordinates - FIXED with proper geolocation */}
                 <View style={styles.formGroup}>
                   <Text style={styles.label}>Location Coordinates</Text>
                   <View style={styles.coordinatesRow}>
@@ -1583,9 +1687,16 @@ if (!isAuthenticated && !initialLoading) {
                   <TouchableOpacity
                     style={styles.getLocationButton}
                     onPress={getCurrentLocation}
+                    disabled={locationLoading}
                   >
-                    <Icon name="map-marker-alt" size={14} color="#fff" />
-                    <Text style={styles.getLocationButtonText}>Get Current Location</Text>
+                    {locationLoading ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Icon name="map-marker-alt" size={14} color="#fff" />
+                        <Text style={styles.getLocationButtonText}>Get Current Location</Text>
+                      </>
+                    )}
                   </TouchableOpacity>
                 </View>
 
@@ -1914,34 +2025,47 @@ if (!isAuthenticated && !initialLoading) {
       {showDatePicker && Platform.OS === 'android' && (
         <DateTimePicker
           value={incidentFormData.dateTime}
-          mode="datetime"
+          mode="date"
           display="default"
           onChange={onDateChange}
         />
       )}
 
+      {/* Android Time Picker */}
+      {showTimePicker && Platform.OS === 'android' && (
+        <DateTimePicker
+          value={incidentFormData.dateTime}
+          mode="time"
+          display="default"
+          onChange={onTimeChange}
+          is24Hour={false}
+        />
+      )}
+
       {/* iOS Date Picker Modal */}
-      {showIOSDatePicker && Platform.OS === 'ios' && (
+      {showIOSPicker && Platform.OS === 'ios' && (
         <Modal
           transparent={true}
           animationType="slide"
-          visible={showIOSDatePicker}
-          onRequestClose={handleDateCancel}
+          visible={showIOSPicker}
+          onRequestClose={handleIOSCancel}
         >
           <View style={styles.iosPickerOverlay}>
             <View style={styles.iosPickerContainer}>
               <View style={styles.iosPickerHeader}>
-                <TouchableOpacity onPress={handleDateCancel}>
+                <TouchableOpacity onPress={handleIOSCancel}>
                   <Text style={styles.iosPickerCancel}>Cancel</Text>
                 </TouchableOpacity>
-                <Text style={styles.iosPickerTitle}>Select Date & Time</Text>
-                <TouchableOpacity onPress={handleDateConfirm}>
+                <Text style={styles.iosPickerTitle}>
+                  {pickerMode === 'date' ? 'Select Date' : 'Select Time'}
+                </Text>
+                <TouchableOpacity onPress={handleIOSConfirm}>
                   <Text style={styles.iosPickerDone}>Done</Text>
                 </TouchableOpacity>
               </View>
               <DateTimePicker
                 value={tempDate}
-                mode="datetime"
+                mode={pickerMode}
                 display="spinner"
                 onChange={onDateChange}
                 style={styles.iosPicker}
@@ -2068,18 +2192,18 @@ if (!isAuthenticated && !initialLoading) {
                       <Text style={styles.modalSectionLabel}>Images:</Text>
                       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                         {selectedIncident.images.map((image) => (
-                         <View style={styles.modalImageContainer}>
-  {image.url || image.s_image_url ? (
-    <Image 
-      source={{ uri: image.url || image.s_image_url }} 
-      style={styles.modalImage}
-    />
-  ) : (
-    <View style={[styles.modalImage, styles.placeholderImage]}>
-      <Icon name="image" size={30} color="#ccc" />
-    </View>
-  )}
-</View>
+                          <View style={styles.modalImageContainer}>
+                            {image.url || image.s_image_url ? (
+                              <Image 
+                                source={{ uri: image.url || image.s_image_url }} 
+                                style={styles.modalImage}
+                              />
+                            ) : (
+                              <View style={[styles.modalImage, styles.placeholderImage]}>
+                                <Icon name="image" size={30} color="#ccc" />
+                              </View>
+                            )}
+                          </View>
                         ))}
                       </ScrollView>
                     </View>
@@ -2184,493 +2308,11 @@ if (!isAuthenticated && !initialLoading) {
   );
 };
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#f5f7fa',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    height: 77,
-    paddingTop: 27,
-    backgroundColor: '#021c67',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  backButton: {
-    padding: 2,
-    borderRadius: 20,
-  },
-  headerTitle: {
-    fontSize: isSmallScreen ? 18 : 20,
-    fontWeight: '700',
-    color: '#f4f4f4',
-  },
-  reportButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f6f7f9',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    gap: 6,
-  },
-  reportButtonText: {
-    color: '#031364',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  mainScrollView: {
-    flex: 1,
-  },
-  loadingOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(255,255,255,0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 9999,
-  },
-  authErrorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  authErrorTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#2c3e50',
-    marginTop: 20,
-    marginBottom: 10,
-  },
-  authErrorMessage: {
-    fontSize: 14,
-    color: '#7f8c8d',
-    textAlign: 'center',
-    marginBottom: 30,
-  },
-  authButton: {
-    backgroundColor: '#11269c',
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 8,
-  },
-  authButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  statsContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    backgroundColor: '#f5f7fa',
-  },
-  statsRow: {
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  statCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    width: (width - 44) / 2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  statIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  statContent: {
-    flex: 1,
-  },
-  statNumber: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#11269C',
-    marginBottom: 2,
-  },
-  statLabel: {
-    fontSize: 11,
-    color: '#64748b',
-    fontWeight: '600',
-    textTransform: 'uppercase',
-  },
-  titleSection: {
-    backgroundColor: '#11269C',
-    padding: 16,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginHorizontal: 16,
-    borderRadius: 8,
-    marginBottom: 12,
-  },
-  titleText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  recordCount: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 16,
-  },
-  recordCountText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  filtersBar: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    padding: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    marginBottom: 12,
-  },
-  searchBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f5f7fa',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  searchInput: {
-    flex: 1,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    fontSize: 14,
-    color: '#000',
-  },
-  filterRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  filterButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#f5f7fa',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  filterButtonText: {
-    fontSize: 13,
-    color: '#333',
-    fontWeight: '500',
-  },
-  clearFiltersButton: {
-    marginTop: 12,
-    alignItems: 'center',
-    padding: 8,
-    backgroundColor: '#f5f7fa',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  clearFiltersText: {
-    fontSize: 13,
-    color: '#11269C',
-    fontWeight: '600',
-  },
-  filterDropdown: {
-    position: 'absolute',
-    top: 180,
-    left: 16,
-    right: 16,
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    zIndex: 1000,
-  },
-  filterDropdownItem: {
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  filterDropdownItemText: {
-    fontSize: 14,
-    color: '#333',
-  },
-  filterDropdownItemSelected: {
-    color: '#11269C',
-    fontWeight: '600',
-  },
-  cardsContainer: {
-    paddingHorizontal: 16,
-  },
-  incidentCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  cardRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  incidentId: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#11269C',
-  },
-  typeBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  severityBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  cardTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#000',
-    marginBottom: 8,
-    lineHeight: 20,
-  },
-  infoWithIcon: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flex: 1,
-  },
-  infoText: {
-    fontSize: 12,
-    color: '#333',
-    flex: 1,
-  },
-  actionButtons: {
+// Add these new styles
+const additionalStyles = {
+  dateTimeRow: {
     flexDirection: 'row',
     gap: 8,
-  },
-  actionBtn: {
-    padding: 6,
-    backgroundColor: '#f5f7fa',
-    borderRadius: 6,
-  },
-  deleteBtn: {
-    backgroundColor: '#FDECEA',
-  },
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 40,
-  },
-  emptyStateText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: '#999',
-  },
-  bottomPadding: {
-    height: 20,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    width: width * 0.95,
-    maxHeight: height * 0.9,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#000',
-  },
-  modalBody: {
-    padding: 16,
-    gap: 12,
-  },
-  formGroup: {
-    marginBottom: 12,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 6,
-  },
-  required: {
-    color: '#dc2626',
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 14,
-    backgroundColor: '#f5f7fa',
-  },
-  textArea: {
-    minHeight: 100,
-    textAlignVertical: 'top',
-  },
-  datePickerButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 8,
-    padding: 12,
-    backgroundColor: '#f5f7fa',
-  },
-  dateText: {
-    fontSize: 14,
-    color: '#333',
-  },
-  dropdownButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 8,
-    padding: 12,
-    backgroundColor: '#f5f7fa',
-  },
-  dropdownButtonText: {
-    fontSize: 14,
-    color: '#333',
-  },
-  dropdownPlaceholder: {
-    fontSize: 14,
-    color: '#999',
-  },
-  dropdownMenu: {
-    position: 'absolute',
-    top: 80,
-    left: 0,
-    right: 0,
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    zIndex: 2000,
-    maxHeight: 200,
-  },
-  dropdownScroll: {
-    maxHeight: 150,
-  },
-  dropdownMenuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  dropdownMenuItemSelected: {
-    backgroundColor: '#f0f3ff',
-  },
-  dropdownMenuItemText: {
-    fontSize: 14,
-    color: '#333',
-  },
-  dropdownMenuItemTextSelected: {
-    color: '#11269C',
-    fontWeight: '600',
-  },
-  checkboxContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  checkbox: {
-    width: 18,
-    height: 18,
-    borderRadius: 4,
-    borderWidth: 2,
-    borderColor: '#11269C',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  checkboxChecked: {
-    backgroundColor: '#11269C',
-  },
-  dropdownCloseButton: {
-    padding: 12,
-    alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
-  },
-  dropdownCloseText: {
-    color: '#11269C',
-    fontSize: 14,
-    fontWeight: '600',
   },
   coordinatesRow: {
     flexDirection: 'row',
@@ -2694,100 +2336,665 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+};
+
+// Define the main styles object first
+const styles = StyleSheet.create({
+  // All your existing styles from the component
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  header: {
+    backgroundColor: '#11269C',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    paddingTop: Platform.OS === 'android' ? 12 : 12,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerTitle: {
+    color: '#fdfdfe',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  reportButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fdfdfe',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    gap: 4,
+  },
+  reportButtonText: {
+    color: '#031779',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  mainScrollView: {
+    flex: 1,
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  statsContainer: {
+    padding: 16,
+    backgroundColor: '#f5f5f5',
+  },
+  statsRow: {
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  statCard: {
+    width: (width - 40) / 2,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  statIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  statContent: {
+    flex: 1,
+  },
+  statNumber: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#666',
+  },
+  titleSection: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#e5e5e5',
+  },
+  titleText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  recordCount: {
+    backgroundColor: '#f0f0f0',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  recordCountText: {
+    fontSize: 12,
+    color: '#666',
+  },
+  filtersBar: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e5e5',
+    zIndex: 100,
+  },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+  },
+  searchInput: {
+    flex: 1,
+    height: 40,
+    paddingHorizontal: 10,
+    color: '#333',
+    fontSize: 14,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  filterButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f5f5f5',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  filterButtonText: {
+    color: '#333',
+    fontSize: 14,
+  },
+  clearFiltersButton: {
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  clearFiltersText: {
+    color: '#11269C',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  filterDropdown: {
+    position: 'absolute',
+    top: 140,
+    left: 16,
+    right: 16,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 5,
+    zIndex: 200,
+    maxHeight: 200,
+  },
+  filterDropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  filterDropdownItemText: {
+    fontSize: 14,
+    color: '#666',
+  },
+  filterDropdownItemSelected: {
+    color: '#11269C',
+    fontWeight: '500',
+  },
+  cardsContainer: {
+    padding: 16,
+  },
+  incidentCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  cardRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  incidentId: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  infoWithIcon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  infoText: {
+    fontSize: 12,
+    color: '#666',
+  },
+  typeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  badgeText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  severityBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  actionBtn: {
+    padding: 6,
+  },
+  deleteBtn: {
+    // No additional styles needed
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    color: '#999',
+    marginTop: 12,
+  },
+  bottomPadding: {
+    height: 20,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: height * 0.9,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e5e5',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+  },
+  modalBody: {
+    padding: 20,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e5e5',
+  },
+  modalButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    gap: 8,
+    minWidth: 100,
+  },
+  modalButtonPrimary: {
+    backgroundColor: '#11269C',
+  },
+  modalButtonSecondary: {
+    backgroundColor: '#f5f5f5',
+  },
+  modalButtonDanger: {
+    backgroundColor: '#E74C3C',
+  },
+  modalButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  modalButtonTextSecondary: {
+    color: '#666',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  modalRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  modalLabel: {
+    width: 120,
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  modalValue: {
+    flex: 1,
+    fontSize: 14,
+    color: '#333',
+  },
+  modalImagesSection: {
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  modalSectionLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+  },
+  modalImageContainer: {
+    marginRight: 12,
+  },
+  modalImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 8,
+  },
+  placeholderImage: {
+    backgroundColor: '#f5f5f5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalPersonsSection: {
+    marginTop: 16,
+  },
+  modalPersonCard: {
+    backgroundColor: '#f9f9f9',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+  },
+  modalPersonName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  modalPersonDetail: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 2,
+  },
+  modalPersonBodyParts: {
+    marginTop: 4,
+  },
+  modalBodyPartsList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 4,
+  },
+  modalBodyPartTag: {
+    backgroundColor: '#11269C',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  modalBodyPartText: {
+    color: '#fff',
+    fontSize: 10,
+  },
+  statusUpdateContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  statusOption: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  statusOptionSelected: {
+    borderColor: '#11269C',
+  },
+  statusOptionText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  // Form styles
+  formGroup: {
+    marginBottom: 20,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#333',
+    marginBottom: 8,
+  },
+  required: {
+    color: '#E74C3C',
+  },
+  input: {
+    backgroundColor: '#f9f9f9',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: '#333',
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+  },
+  textArea: {
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+  dropdownButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f9f9f9',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+  },
+  dropdownButtonText: {
+    fontSize: 14,
+    color: '#333',
+  },
+  dropdownPlaceholder: {
+    fontSize: 14,
+    color: '#999',
+  },
+  dropdownMenu: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 5,
+    zIndex: 1000,
+    maxHeight: 200,
+  },
+  dropdownScroll: {
+    maxHeight: 150,
+  },
+  dropdownMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  dropdownMenuItemSelected: {
+    backgroundColor: '#f0f0f0',
+  },
+  dropdownMenuItemText: {
+    fontSize: 14,
+    color: '#666',
+  },
+  dropdownMenuItemTextSelected: {
+    color: '#11269C',
+    fontWeight: '500',
+  },
+  dropdownCloseButton: {
+    padding: 12,
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#e5e5e5',
+  },
+  dropdownCloseText: {
+    color: '#11269C',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  checkboxContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  checkbox: {
+    width: 18,
+    height: 18,
+    borderWidth: 2,
+    borderColor: '#11269C',
+    borderRadius: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#11269C',
+  },
   uploadButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#f5f7fa',
+    backgroundColor: '#f0f0f0',
     padding: 16,
     borderRadius: 8,
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: '#11269C',
     borderStyle: 'dashed',
   },
   uploadButtonText: {
     color: '#11269C',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '500',
   },
   uploadHint: {
     fontSize: 11,
     color: '#999',
     marginTop: 4,
-    textAlign: 'center',
   },
   imagePreviewGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginTop: 8,
+    marginTop: 12,
   },
   imagePreviewItem: {
-    width: (width - 64) / 2,
-    height: 150,
-    borderRadius: 8,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
+    width: (width - 70) / 3,
+    height: (width - 70) / 3,
+    position: 'relative',
   },
   imagePreview: {
     width: '100%',
     height: '100%',
+    borderRadius: 8,
   },
   imagePreviewOverlay: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    padding: 8,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+    padding: 4,
   },
   imageCaptionInput: {
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.9)',
     borderRadius: 4,
-    padding: 4,
-    fontSize: 11,
-    marginBottom: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    fontSize: 10,
+    color: '#333',
   },
   removeImageButton: {
     position: 'absolute',
     top: 4,
     right: 4,
-    backgroundColor: 'rgba(231, 76, 60, 0.9)',
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    backgroundColor: '#E74C3C',
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
   },
   documentList: {
-    marginTop: 8,
-    gap: 8,
+    marginTop: 12,
   },
   documentItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 12,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#f9f9f9',
     borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: '#e5e5e5',
   },
   documentInfo: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    flex: 1,
+    gap: 12,
   },
   documentDetails: {
     flex: 1,
   },
   documentName: {
     fontSize: 13,
-    fontWeight: '500',
     color: '#333',
+    fontWeight: '500',
   },
   documentSize: {
     fontSize: 11,
@@ -2797,12 +3004,12 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   personCard: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#f9f9f9',
     borderRadius: 8,
     padding: 12,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: '#e5e5e5',
   },
   personHeader: {
     flexDirection: 'row',
@@ -2813,7 +3020,7 @@ const styles = StyleSheet.create({
   personTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#11269C',
+    color: '#333',
   },
   personInput: {
     marginBottom: 8,
@@ -2831,14 +3038,13 @@ const styles = StyleSheet.create({
   },
   bodyPartsLabel: {
     fontSize: 13,
-    fontWeight: '600',
-    color: '#333',
+    color: '#666',
     marginBottom: 8,
   },
   selectedBodyParts: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
+    gap: 4,
     marginBottom: 8,
   },
   bodyPartTag: {
@@ -2846,180 +3052,41 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     backgroundColor: '#11269C',
-    paddingVertical: 4,
     paddingHorizontal: 8,
-    borderRadius: 16,
+    paddingVertical: 4,
+    borderRadius: 4,
   },
   bodyPartTagText: {
-    fontSize: 11,
     color: '#fff',
-    fontWeight: '500',
+    fontSize: 11,
   },
   addBodyPartButton: {
-    backgroundColor: '#f0f3ff',
     padding: 8,
-    borderRadius: 6,
-    marginBottom: 6,
+    marginBottom: 4,
   },
   addBodyPartButtonText: {
-    fontSize: 12,
     color: '#11269C',
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '500',
   },
   addPersonButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
+    backgroundColor: '#f0f0f0',
     padding: 12,
-    backgroundColor: '#f0f3ff',
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#11269C',
     borderStyle: 'dashed',
   },
   addPersonButtonText: {
-    fontSize: 14,
     color: '#11269C',
-    fontWeight: '600',
-  },
-  modalRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    marginBottom: 8,
-  },
-  modalLabel: {
-    width: 100,
-    fontSize: 13,
-    color: '#666',
-    fontWeight: '600',
-  },
-  modalValue: {
-    flex: 1,
-    fontSize: 13,
-    color: '#333',
-  },
-  modalSectionLabel: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#11269C',
-    marginBottom: 8,
-  },
-  modalImagesSection: {
-    marginBottom: 12,
-  },
-  modalImageContainer: {
-    marginRight: 8,
-  },
-  modalImage: {
-    width: 100,
-    height: 80,
-    borderRadius: 6,
-  },
-  modalImageCaption: {
-    fontSize: 10,
-    color: '#666',
-    marginTop: 2,
-  },
-  modalPersonsSection: {
-    marginBottom: 12,
-  },
-  modalPersonCard: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
-  },
-  modalPersonName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#11269C',
-    marginBottom: 4,
-  },
-  modalPersonDetail: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 2,
-  },
-  modalPersonBodyParts: {
-    marginTop: 4,
-  },
-  modalBodyPartsList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 4,
-    marginTop: 4,
-  },
-  modalBodyPartTag: {
-    backgroundColor: '#11269C',
-    paddingVertical: 2,
-    paddingHorizontal: 6,
-    borderRadius: 12,
-  },
-  modalBodyPartText: {
-    fontSize: 10,
-    color: '#fff',
     fontWeight: '500',
   },
-  statusUpdateContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    gap: 6,
-    flexWrap: 'wrap',
-  },
-  statusOption: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  statusOptionSelected: {
-    borderColor: '#11269C',
-    borderWidth: 2,
-  },
-  statusOptionText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  modalActions: {
-    flexDirection: 'row',
-    padding: 16,
-    gap: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
-  },
-  modalButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  modalButtonPrimary: {
-    backgroundColor: '#11269C',
-  },
-  modalButtonSecondary: {
-    backgroundColor: '#f5f7fa',
-    borderWidth: 1,
-    borderColor: '#11269C',
-  },
-  modalButtonDanger: {
-    backgroundColor: '#E74C3C',
-  },
-  modalButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  modalButtonTextSecondary: {
-    color: '#11269C',
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  // iOS Date Picker
   iosPickerOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -3034,19 +3101,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: '#e5e5e5',
   },
   iosPickerCancel: {
-    color: '#666',
+    color: '#E74C3C',
     fontSize: 16,
-    fontWeight: '500',
   },
   iosPickerTitle: {
-    color: '#000',
     fontSize: 16,
     fontWeight: '600',
+    color: '#333',
   },
   iosPickerDone: {
     color: '#11269C',
@@ -3056,39 +3123,35 @@ const styles = StyleSheet.create({
   iosPicker: {
     height: 200,
   },
+  // Delete confirmation modal
   confirmModal: {
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 24,
-    width: width * 0.8,
-    alignItems: 'center',
+    width: width - 40,
+    alignSelf: 'center',
   },
   confirmIcon: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: '#FDECEA',
-    justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
   },
   confirmTitle: {
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#333',
-    marginBottom: 8,
+    textAlign: 'center',
+    marginBottom: 12,
   },
   confirmMessage: {
     fontSize: 14,
     color: '#666',
     textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 20,
+    marginBottom: 20,
   },
   confirmActions: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     gap: 12,
-    width: '100%',
   },
   confirmButton: {
     flex: 1,
@@ -3097,23 +3160,96 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   confirmCancel: {
-    backgroundColor: '#f5f7fa',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  confirmCancelText: {
-    color: '#666',
-    fontSize: 14,
-    fontWeight: '600',
+    backgroundColor: '#f5f5f5',
   },
   confirmDelete: {
     backgroundColor: '#E74C3C',
   },
+  confirmCancelText: {
+    color: '#666',
+    fontSize: 14,
+    fontWeight: '500',
+  },
   confirmDeleteText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  // Auth error styles
+  authErrorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  authErrorTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  authErrorMessage: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  authButton: {
+    backgroundColor: '#11269C',
+    paddingHorizontal: 30,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  authButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  // Add the new styles from additionalStyles
+  dateTimeRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  datePickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f9f9f9',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+  },
+  dateText: {
+    fontSize: 14,
+    color: '#333',
+  },
+  coordinatesRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  coordinateInput: {
+    flex: 1,
+  },
+  getLocationButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#11269C',
+    padding: 12,
+    borderRadius: 8,
+  },
+  getLocationButtonText: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
   },
 });
 
+// Export the component with all styles
 export default IncidentAndInjuryScreen;
+

@@ -4,7 +4,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StyleSheet, View, ActivityIndicator } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { AuthProvider, useAuth } from '../EsselPropack/screens/worker-module/context/AuthContext';
+import { AuthProvider, useAuth } from './screens/worker-module/context/AuthContext';
 import { ROLES } from './screens/constants/roles';
 
 // Import screens
